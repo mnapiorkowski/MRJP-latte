@@ -2,10 +2,10 @@
 
 entrypoints     Program ;
 Progr.          Program ::= [TopDef] ;
-FnDef.	        TopDef ::= Type Ident "(" [Arg] ")" Block ;
+FnDef.	        TopDef ::= TType Ident "(" [Arg] ")" Block ;
 separator       nonempty TopDef "" ;
 
-AArg.           Arg ::= Type Ident ;
+AArg.           Arg ::= TType Ident ;
 separator       Arg "," ;
 
 -- statements ----------------------------------------------
@@ -16,14 +16,16 @@ SEmpty.         Stmt ::= ";" ;
 SBlock.         Stmt ::= Block ;
 SExp.           Stmt ::= Expr  ";" ;
 
-SDecl.          Stmt ::= Type [Item] ";" ;
+SDecl.          Stmt ::= TType [Item] ";" ;
 NoInit.         Item ::= Ident ;
 Init.           Item ::= Ident "=" Expr ;
 separator       nonempty Item "," ;
 
-SAss.           Stmt ::= Ident "=" Expr  ";" ;
-SIncr.          Stmt ::= Ident "++"  ";" ;
-SDecr.          Stmt ::= Ident "--"  ";" ;
+LVar.           LVal ::= Ident ;
+LArr.           LVal ::= Expr6 "[" Expr "]" ;
+SAss.           Stmt ::= LVal "=" Expr  ";" ;
+SIncr.          Stmt ::= LVal "++"  ";" ;
+SDecr.          Stmt ::= LVal "--"  ";" ;
 
 SRet.           Stmt ::= "return" Expr ";" ;
 SVRet.          Stmt ::= "return" ";" ;
@@ -32,31 +34,30 @@ SIf.            Stmt ::= "if" "(" Expr ")" Stmt ;
 SIfElse.        Stmt ::= "if" "(" Expr ")" Stmt "else" Stmt ;
 
 SWhile.         Stmt ::= "while" "(" Expr ")" Stmt ;
-SFor.           Stmt ::= "for" "(" Type Ident ":" Expr ")" Stmt ;
+SFor.           Stmt ::= "for" "(" TType Ident ":" Expr ")" Stmt ;
 
 -- Types ---------------------------------------------------
 
-TInt.           Type ::= "int" ;
-TBool.          Type ::= "bool" ;
-TString.        Type ::= "string" ;
-TVoid.          Type ::= "void" ;
-TArr.           Type ::= Type "[]" ;
-
--- internal TFun.  Type ::= Type "(" [Type] ")" ;
--- separator       Type "," ;
+TInt.           TType ::= "int" ;
+TBool.          TType ::= "boolean" ;
+TString.        TType ::= "string" ;
+TVoid.          TType ::= "void" ;
+TArray.         TType ::= TType "[]" ;
 
 -- Expressions ---------------------------------------------
 
-EVar.           Expr6 ::= Ident ;
-ELitInt.        Expr6 ::= Integer ;
-ELitTrue.       Expr6 ::= "true" ;
-ELitFalse.      Expr6 ::= "false" ;
-EString.        Expr6 ::= String ;
-ENewArr.        Expr6 ::= "new" Type "[" Expr "]" ;
-EApp.           Expr6 ::= Ident "(" [Expr] ")" ;
+ELitInt.        Expr7 ::= Integer ;
+ELitTrue.       Expr7 ::= "true" ;
+ELitFalse.      Expr7 ::= "false" ;
+EString.        Expr7 ::= String ;
 
-Neg.            Expr5 ::= "-" Expr6 ;
-Not.            Expr5 ::= "!" Expr6 ;
+ELVal.          Expr6 ::= LVal ;
+EApp.           Expr6 ::= Ident "(" [Expr] ")" ;
+ENewArr.        Expr6 ::= "new" TType "[" Expr "]" ;
+
+EAttr.          Expr5 ::= Expr6 "." Ident ;
+ENeg.           Expr5 ::= "-" Expr6 ;
+ENot.           Expr5 ::= "!" Expr6 ;
 
 EMul.           Expr4 ::= Expr4 MulOp Expr5 ;
 
@@ -68,7 +69,7 @@ EAnd.           Expr1 ::= Expr2 "&&" Expr1 ;
 
 EOr.            Expr ::= Expr1 "||" Expr ;
 
-coercions       Expr 6 ;
+coercions       Expr 7 ;
 separator       Expr "," ;
 
 -- operators -----------------------------------------------

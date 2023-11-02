@@ -1,11 +1,11 @@
 module Main where
 
 import System.IO
-import System.Process         (callProcess)
+import System.Process                 (callProcess)
 
-import Frontend.Utils
-import Frontend.Parser        (parse)
-import Frontend.Typechecker   (typecheck)
+import Frontend.Utils 
+import Frontend.Parser                (parse)
+import Frontend.Typechecker.Program   (typecheck)
 
 main :: IO ()
 main = do
