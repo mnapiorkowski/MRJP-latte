@@ -17,6 +17,8 @@ type Pos = BNFC'Position
 data Type = IntT | StringT | BoolT | VoidT | ArrayT Type
   deriving Eq
 
+data Val = IntV Integer | StringV String | BoolV Bool
+
 type VarEnv = Map Ident Type
 type FuncEnv = Map Ident (Type, [Type])
 type VarsInBlock = Set Ident

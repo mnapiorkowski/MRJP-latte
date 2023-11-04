@@ -81,16 +81,68 @@ mergeEnv (varEnv, funcEnv, varsInBlock) = do
     let newVarsInBlock = Set.union oldVarsInBlock varsInBlock
     return (newVarEnv, newFuncEnv, newVarsInBlock)
 
+tryEval :: Expr -> Maybe Val
+tryEval e = case e of
+  ELitTrue _ -> Just $ BoolV True
+  ELitFalse _ -> Just $ BoolV False
+  ENot _ e -> case tryEval e of
+    Just (BoolV b) -> Just $ BoolV (not b)
+    Nothing -> Nothing
+  _ -> Nothing
+
+doesAlwaysReturn :: Stmt -> Bool
+doesAlwaysReturn s = case s of
+  SRet _ _ -> True
+  SBlock _ (BBlock _ ss) -> doAlwaysReturn ss
+  SIf _ e s -> do
+    case tryEval e of
+      Just (BoolV b) -> do
+        if b == True    -- expression evaluates to True
+          then doesAlwaysReturn s
+        else False      -- expression evaluates to False
+      Nothing -> False  -- could not evaluate expression 
+  SIfElse _ e sIf sElse -> do
+    case tryEval e of
+      Just (BoolV b) -> do
+        if b == True
+          then doesAlwaysReturn sIf
+        else doesAlwaysReturn sElse
+      Nothing -> (doesAlwaysReturn sIf) && (doesAlwaysReturn sElse)
+  SWhile _ e s -> do
+    case tryEval e of
+      Just (BoolV b) -> do
+        if b == True
+          then doesAlwaysReturn s
+        else False
+      Nothing -> False
+  _ -> False
+
+doAlwaysReturn :: [Stmt] -> Bool
+doAlwaysReturn [] = False
+doAlwaysReturn (s:ss) = do
+  if doesAlwaysReturn s
+    then True
+  else doAlwaysReturn ss
+
+analyseReturns :: Block -> Ident -> TM ()
+analyseReturns (BBlock pos ss) id = do
+  if doAlwaysReturn ss
+    then return ()
+  else throwE pos $
+    "function " ++ printTree id ++ " does not always return a value"
+
 checkFnDef :: Pos -> Ident -> [Arg] -> Block -> TM ()
 checkFnDef pos id ps b = do
   env@(_, funcEnv, _) <- ask
   let (t, paramTs) = funcEnv Map.! id
+  put (id)
   env1 <- local (const (Map.empty, Map.empty, Set.empty)) $ checkParams ps
   env2 <- local (const env1) $ setFunc t id paramTs -- recursion
   env3 <- local (const env) $ mergeEnv env2
-  put (id)
-  env4 <- local (const env3) $ checkBlock b
-  return ()
+  local (const env3) $ checkBlock b
+  if t /= VoidT
+    then analyseReturns b id
+  else return ()
 
 checkTopDef :: TopDef -> TM ()
 checkTopDef d = case d of
