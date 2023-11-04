@@ -56,7 +56,7 @@ typeOfRelOp pos e1 op e2 = case op of
 
 typeOfVar :: Pos -> Ident -> TM Type
 typeOfVar pos id = do
-  (varEnv, _) <- ask
+  (varEnv, _, _) <- ask
   if Map.notMember id varEnv
     then throwE pos $
       "variable " ++ printTree id ++ " is not declared"
@@ -97,7 +97,7 @@ checkArgs pos id (t:ts) (e:es) = do
 
 typeOfApp :: Pos -> Ident -> [Expr] -> TM Type
 typeOfApp pos id es = do
-  (_, funcEnv) <- ask
+  (_, funcEnv, _) <- ask
   if id == Ident "main"
     then throwE pos "cannot call main function"
   else if Map.notMember id funcEnv

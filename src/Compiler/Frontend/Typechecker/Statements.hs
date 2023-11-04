@@ -1,8 +1,10 @@
 module Frontend.Typechecker.Statements where
 
 import Control.Monad.Reader
+import Control.Monad.State
 
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 import Latte.Abs
 import Latte.Print (printTree)
@@ -13,9 +15,10 @@ import Frontend.Typechecker.Expressions (typeOfExpr, typeOfLVal, checkUnaryOp)
 
 setVar :: Type -> Ident -> TM Env
 setVar t id = do
-  (varEnv, funcEnv) <- ask
+  (varEnv, funcEnv, varsInBlock) <- ask
   let varEnv' = Map.insert id t varEnv
-  return (varEnv', funcEnv) 
+  let varsInBlock' = Set.insert id varsInBlock
+  return (varEnv', funcEnv, varsInBlock')
 
 checkSExp :: Expr -> TM Env  
 checkSExp e = do
@@ -24,10 +27,10 @@ checkSExp e = do
 
 checkNoInit :: Pos -> Type -> Ident -> TM Env
 checkNoInit pos t id = do
-  (varEnv, _) <- ask
-  if Map.member id varEnv
-    then throwE pos $
-      "variable " ++ printTree id ++ " has already been declared"
+  (_, _, varsInBlock) <- ask
+  if Set.member id varsInBlock
+  then throwE pos $
+    "variable " ++ printTree id ++ " has already been declared"
   else setVar t id
 
 checkInit :: Pos -> Type -> Ident -> Expr -> TM Env
@@ -78,6 +81,28 @@ checkSIncrDecr pos lv = do
       printTree lv
   else ask
 
+checkSRet :: Pos -> Expr -> TM Env
+checkSRet pos e = do
+  t <- typeOfExpr e
+  funcId <- get
+  env@(_, funcEnv, _) <- ask
+  let (retT, _) = funcEnv Map.! funcId
+  if t /= retT
+    then throwE pos $
+      "return type of function " ++ printTree funcId ++ 
+      " does not match function's signature"
+  else return env
+
+checkSVRet :: Pos -> TM Env
+checkSVRet pos = do
+  funcId <- get
+  env@(_, funcEnv, _) <- ask
+  let (retT, _) = funcEnv Map.! funcId
+  if retT /= VoidT
+    then throwE pos $
+      "void return in non-void function " ++ printTree funcId
+  else return env
+
 checkIfExpr :: Pos -> Expr -> TM ()
 checkIfExpr pos e = do
   t <- typeOfExpr e
@@ -117,8 +142,11 @@ checkSFor pos tt id e s = do
       "wrong type of expression in for loop: " ++ printTree e ++
       "\nexpected type: " ++ showType (ArrayT t)
   else do
-    env <- setVar t id
-    local (const env) $ checkStmt s
+    (varEnv, funcEnv, _) <- setVar t id
+    let blockEnv = (varEnv, funcEnv, Set.singleton id)
+    case s of
+      SBlock _ (BBlock _ ss) -> local (const blockEnv) $ checkStmts ss
+      _ -> local (const blockEnv) $ checkStmt s
     ask
 
 checkStmt :: Stmt -> TM Env
@@ -130,13 +158,12 @@ checkStmt s = case s of
   SAss pos lv e -> checkSAss pos lv e
   SIncr pos lv -> checkSIncrDecr pos lv
   SDecr pos lv -> checkSIncrDecr pos lv
-  -- SRet pos e -> checkSRet pos e
-  -- SVRet pos -> check SVRet pos
+  SRet pos e -> checkSRet pos e
+  SVRet pos -> checkSVRet pos
   SIf pos e s -> checkSIf pos e s
   SIfElse pos e sIf sElse -> checkSIfElse pos e sIf sElse
   SWhile pos e s -> checkSWhile pos e s
   SFor pos tt id e s -> checkSFor pos tt id e s
-  _ -> ask
 
 checkStmts :: [Stmt] -> TM Env
 checkStmts [] = ask
@@ -145,4 +172,7 @@ checkStmts (s:ss) = do
   local (const env) $ checkStmts ss
 
 checkBlock :: Block -> TM Env
-checkBlock (BBlock _ ss) = checkStmts ss
+checkBlock (BBlock _ ss) = do
+  env@(varEnv, funcEnv, _) <- ask
+  local (const (varEnv, funcEnv, Set.empty)) $ checkStmts ss
+  return env

@@ -4,8 +4,10 @@ import System.IO
 
 import Control.Monad.Except
 import Control.Monad.Reader
+import Control.Monad.State
 
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 import Latte.Abs
 import Latte.Print (printTree)
@@ -26,14 +28,14 @@ typeOfParams (p:ps) = do
 
 setFunc :: Type -> Ident -> [Type] -> TM Env
 setFunc t id paramTs = do
-  (varEnv, funcEnv) <- ask
+  (varEnv, funcEnv, varsInBlock) <- ask
   let funcEnv' = Map.insert id (t, paramTs) funcEnv
-  return (varEnv, funcEnv') 
+  return (varEnv, funcEnv', varsInBlock) 
 
 setFnDef :: Pos -> TType -> Ident -> [Arg] -> TM Env
 setFnDef pos tt id as = do
   let t = convType tt
-  (_, funcEnv) <- ask
+  (_, funcEnv, _) <- ask
   if Map.member id funcEnv
     then throwE pos $
       "function " ++ printTree id ++ " is already defined"
@@ -58,7 +60,7 @@ checkParam (AArg pos tt id) = do
     then throwE pos $
       "function parameter " ++ printTree id ++ " is void-type"
   else do
-    (varEnv, _) <- ask
+    (varEnv, _, _) <- ask
     if Map.member id varEnv
       then throwE pos $
         "function parameters have the same identifiers " ++ 
@@ -72,30 +74,22 @@ checkParams (p:ps) = do
   local (const env) $ checkParams ps
 
 mergeEnv :: Env -> TM Env
-mergeEnv (varEnv, funcEnv) = do
-    (oldVarEnv, oldFuncEnv) <- ask
+mergeEnv (varEnv, funcEnv, varsInBlock) = do
+    (oldVarEnv, oldFuncEnv, oldVarsInBlock) <- ask
     let newVarEnv = Map.union oldVarEnv varEnv
     let newFuncEnv = Map.union oldFuncEnv funcEnv
-    return (newVarEnv, newFuncEnv)
+    let newVarsInBlock = Set.union oldVarsInBlock varsInBlock
+    return (newVarEnv, newFuncEnv, newVarsInBlock)
 
 checkFnDef :: Pos -> Ident -> [Arg] -> Block -> TM ()
 checkFnDef pos id ps b = do
-  env@(_, funcEnv) <- ask
+  env@(_, funcEnv, _) <- ask
   let (t, paramTs) = funcEnv Map.! id
-  env1 <- local (const (Map.empty, Map.empty)) $ checkParams ps
+  env1 <- local (const (Map.empty, Map.empty, Set.empty)) $ checkParams ps
   env2 <- local (const env1) $ setFunc t id paramTs -- recursion
   env3 <- local (const env) $ mergeEnv env2
+  put (id)
   env4 <- local (const env3) $ checkBlock b
-  -- env5 <- case r of
-  --   Turnback _ _ -> local (const env4) $ checkBlock (reverseBlock b)
-  --   VTurnback _ -> local (const env4) $ checkBlock (reverseBlock b)
-  --   _ -> return env4
-  -- retT <- local (const env5) $ typeofRet r
-  -- if retT /= t
-  --   then throwE pos $
-  --     "return type of function '" ++ printTree id ++
-  --     "' does not match function's signature"
-  -- else return ()
   return ()
 
 checkTopDef :: TopDef -> TM ()
@@ -110,7 +104,7 @@ checkTopDefs (d:ds) = do
 
 checkProgr :: Program -> TM ()
 checkProgr (Progr pos ds) = do
-  env@(_, funcEnv) <- setTopDefs ds
+  env@(_, funcEnv, _) <- setTopDefs ds
   local (const env) $ checkTopDefs ds
   let main = Ident "main"
   if Map.notMember main funcEnv
@@ -136,7 +130,9 @@ typecheck p = do
         (Ident "readInt", (IntT, [])),
         (Ident "readString", (StringT, []))
         ]
-  let res = runExcept $ runReaderT (checkProgr p) (initVarEnv, initFuncEnv)
+  let initContext = (Ident "")
+  let initEnv = (initVarEnv, initFuncEnv, Set.empty)
+  let res = runExcept $ runReaderT (runStateT (checkProgr p) initContext) initEnv
   case res of
     Left err -> printError ("semantic error " ++ err)
     Right _ -> return ()
