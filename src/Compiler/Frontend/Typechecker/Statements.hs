@@ -91,6 +91,8 @@ checkSRet pos e = do
     then throwE pos $
       "return type of function " ++ printTree funcId ++ 
       " does not match function's signature"
+  else if t == VoidT
+    then throwE pos $ "cannot return void-type expression"
   else return env
 
 checkSVRet :: Pos -> TM Env

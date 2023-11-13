@@ -90,43 +90,41 @@ tryEval e = case e of
     Nothing -> Nothing
   _ -> Nothing
 
-doesAlwaysReturn :: Stmt -> Bool
-doesAlwaysReturn s = case s of
+doesReturnOrLoopForever :: Stmt -> Bool
+doesReturnOrLoopForever s = case s of
   SRet _ _ -> True
-  SBlock _ (BBlock _ ss) -> doAlwaysReturn ss
+  SBlock _ (BBlock _ ss) -> doReturnOrLoopForever ss
+  SExp _ (EApp _ (Ident "error") []) -> True
   SIf _ e s -> do
     case tryEval e of
       Just (BoolV b) -> do
         if b == True    -- expression evaluates to True
-          then doesAlwaysReturn s
+          then doesReturnOrLoopForever s
         else False      -- expression evaluates to False
       Nothing -> False  -- could not evaluate expression 
   SIfElse _ e sIf sElse -> do
     case tryEval e of
       Just (BoolV b) -> do
         if b == True
-          then doesAlwaysReturn sIf
-        else doesAlwaysReturn sElse
-      Nothing -> (doesAlwaysReturn sIf) && (doesAlwaysReturn sElse)
+          then doesReturnOrLoopForever sIf
+        else doesReturnOrLoopForever sElse
+      Nothing -> (doesReturnOrLoopForever sIf) && (doesReturnOrLoopForever sElse)
   SWhile _ e s -> do
     case tryEval e of
-      Just (BoolV b) -> do
-        if b == True
-          then doesAlwaysReturn s
-        else False
+      Just (BoolV b) -> b
       Nothing -> False
   _ -> False
 
-doAlwaysReturn :: [Stmt] -> Bool
-doAlwaysReturn [] = False
-doAlwaysReturn (s:ss) = do
-  if doesAlwaysReturn s
+doReturnOrLoopForever :: [Stmt] -> Bool
+doReturnOrLoopForever [] = False
+doReturnOrLoopForever (s:ss) = do
+  if doesReturnOrLoopForever s
     then True
-  else doAlwaysReturn ss
+  else doReturnOrLoopForever ss
 
-analyseReturns :: Block -> Ident -> TM ()
-analyseReturns (BBlock pos ss) id = do
-  if doAlwaysReturn ss
+analyseFlow :: Block -> Ident -> TM ()
+analyseFlow (BBlock pos ss) id = do
+  if (doReturnOrLoopForever ss)
     then return ()
   else throwE pos $
     "function " ++ printTree id ++ " does not always return a value"
@@ -141,7 +139,7 @@ checkFnDef pos id ps b = do
   env3 <- local (const env) $ mergeEnv env2
   local (const env3) $ checkBlock b
   if t /= VoidT
-    then analyseReturns b id
+    then analyseFlow b id
   else return ()
 
 checkTopDef :: TopDef -> TM ()
