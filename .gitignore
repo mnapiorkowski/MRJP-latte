@@ -4,7 +4,8 @@
 !README.md
 
 !lib/
-!lib/*
+lib/*
+!lib/*.ll
 
 !src/
 src/*

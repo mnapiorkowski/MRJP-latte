@@ -1,4 +1,4 @@
-module Frontend.Utils where
+module Utils where
 
 import System.IO
 import System.Environment     (getArgs)
@@ -51,6 +51,13 @@ printError err = do
   hPutStrLn stderr err
   exitFailure
 
+tryReadFile :: String -> IO String
+tryReadFile filePath = do
+  res <- try $ readFile $ filePath :: IO (Either IOException String)
+  case res of
+    Left _ -> printError ("could not read file " ++ filePath)
+    Right file -> return file
+
 readSource :: IO (String, String)
 readSource = do
   args <- getArgs
@@ -62,7 +69,6 @@ readSource = do
     if ext /= ".lat"
       then printError "source file must have extension .lat"
     else do
-      res <- try $ readFile $ filePath :: IO (Either IOException String)
-      case res of
-        Left _ -> printError ("could not read file " ++ filePath)
-        Right file -> return (file, filePathNoExt)
+      file <- tryReadFile filePath
+      return (file, filePathNoExt)
+

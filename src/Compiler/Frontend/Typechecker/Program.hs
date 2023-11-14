@@ -12,8 +12,8 @@ import qualified Data.Set as Set
 import Latte.Abs
 import Latte.Print (printTree)
 
+import Utils
 import Frontend.Types
-import Frontend.Utils
 import Frontend.Typechecker.Statements (setVar, checkBlock)
 
 typeOfParam :: Arg -> TM Type

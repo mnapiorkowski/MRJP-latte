@@ -7,8 +7,8 @@ import qualified Data.Map as Map
 import Latte.Abs
 import Latte.Print (printTree)
 
+import Utils
 import Frontend.Types
-import Frontend.Utils
 
 checkUnaryOp :: Pos -> Type -> Expr -> TM ()
 checkUnaryOp pos t e = do

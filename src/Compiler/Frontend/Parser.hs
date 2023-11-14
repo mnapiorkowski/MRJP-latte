@@ -3,10 +3,10 @@ module Frontend.Parser where
 import System.IO
 import System.Exit  (exitFailure)
 
-import Frontend.Utils
-
 import Latte.Abs
 import Latte.Par    (pProgram, myLexer)
+
+import Utils
 
 parse :: String -> IO Program
 parse file = do
