@@ -16,7 +16,7 @@ declare void @exit(i32)
 define void @printInt(i32 %x) {
 entry:
   %dnl = getelementptr [4 x i8], [4 x i8]* @dnl, i32 0, i32 0
-  call i32 (i8*, ...) @printf(i8* %dnl, i32 %x) 
+  call i32 (i8*, ...) @printf(i8* %dnl, i32 %x)
   ret void
 }
 

@@ -12,8 +12,9 @@ import qualified Data.Set as Set
 import Latte.Abs
 import Latte.Print (printTree)
 
-import Utils
+import Common
 import Frontend.Types
+import Frontend.Utils
 import Frontend.Typechecker.Statements (setVar, checkBlock)
 
 typeOfParam :: Arg -> TM Type
@@ -152,7 +153,7 @@ checkTopDefs (d:ds) = do
   checkTopDef d
   checkTopDefs ds
 
-checkProgr :: Program -> TM ()
+checkProgr :: Program -> TM FuncEnv
 checkProgr (Progr pos ds) = do
   env@(_, funcEnv, _) <- setTopDefs ds
   local (const env) $ checkTopDefs ds
@@ -168,9 +169,9 @@ checkProgr (Progr pos ds) = do
     else if not $ null paramTs
       then throwE pos $
         "main function cannot have any parameters"
-    else return ()
+    else return funcEnv
 
-typecheck :: Program -> IO ()
+typecheck :: Program -> IO FuncEnv
 typecheck p = do
   let initVarEnv = Map.empty
   let initFuncEnv = Map.fromList [
@@ -182,7 +183,7 @@ typecheck p = do
         ]
   let initContext = (Ident "")
   let initEnv = (initVarEnv, initFuncEnv, Set.empty)
-  let res = runExcept $ runReaderT (runStateT (checkProgr p) initContext) initEnv
+  let res = runExcept $ runReaderT (evalStateT (checkProgr p) initContext) initEnv
   case res of
     Left err -> printError ("semantic error " ++ err)
-    Right _ -> return ()
+    Right env -> return env

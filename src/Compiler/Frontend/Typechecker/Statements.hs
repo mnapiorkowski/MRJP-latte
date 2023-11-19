@@ -9,8 +9,9 @@ import qualified Data.Set as Set
 import Latte.Abs
 import Latte.Print (printTree)
 
-import Utils
+import Common
 import Frontend.Types
+import Frontend.Utils
 import Frontend.Typechecker.Expressions (typeOfExpr, typeOfLVal, checkUnaryOp)
 
 setVar :: Type -> Ident -> TM Env

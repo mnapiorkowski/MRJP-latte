@@ -6,7 +6,7 @@ import System.Exit  (exitFailure)
 import Latte.Abs
 import Latte.Par    (pProgram, myLexer)
 
-import Utils
+import Common
 
 parse :: String -> IO Program
 parse file = do

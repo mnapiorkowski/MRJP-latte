@@ -7,8 +7,9 @@ import qualified Data.Map as Map
 import Latte.Abs
 import Latte.Print (printTree)
 
-import Utils
+import Common
 import Frontend.Types
+import Frontend.Utils
 
 checkUnaryOp :: Pos -> Type -> Expr -> TM ()
 checkUnaryOp pos t e = do
@@ -65,12 +66,12 @@ typeOfVar pos id = do
 typeOfLVal :: Pos -> LVal -> TM Type
 typeOfLVal pos lv = case lv of
   LVar pos id -> typeOfVar pos id
-  LArr pos eId eAt -> do
-    idT <- typeOfExpr eId
+  LArr pos id eAt -> do
+    idT <- typeOfVar pos id
     atT <- typeOfExpr eAt
     if not (isArrayType idT)
       then throwE pos $ 
-        "operator [] applied to non-array expression " ++ printTree eId
+        "operator [] applied to non-array-type variable " ++ printTree id
     else if atT /= IntT
       then throwE pos $
         "array index is not int-type: " ++ printTree eAt

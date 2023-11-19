@@ -10,17 +10,13 @@ import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 
-import Latte.Abs (Ident, Expr, BNFC'Position)
+import Latte.Abs (Ident, Expr)
 
-type Pos = BNFC'Position
-
-data Type = IntT | StringT | BoolT | VoidT | ArrayT Type
-  deriving Eq
+import Common
 
 data Val = IntV Integer | StringV String | BoolV Bool
 
 type VarEnv = Map Ident Type
-type FuncEnv = Map Ident (Type, [Type])
 type VarsInBlock = Set Ident
 type Env = (VarEnv, FuncEnv, VarsInBlock)
 

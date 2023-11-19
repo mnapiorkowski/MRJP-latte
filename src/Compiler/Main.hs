@@ -3,7 +3,7 @@ module Main where
 import System.IO
 import System.Process                 (callProcess)
 
-import Utils 
+import Common 
 import Frontend.Parser                (parse)
 import Frontend.Typechecker.Program   (typecheck)
 
@@ -13,8 +13,8 @@ main :: IO ()
 main = do
   (file, filePathNoExt) <- readSource
   progr <- parse file
-  typecheck progr
-  code <- compile progr
+  env <- typecheck progr
+  code <- compile progr env
   writeFile (filePathNoExt ++ ".ll") code
   callProcess "llvm-as" [
     "-o", filePathNoExt ++ "_temp.bc", 

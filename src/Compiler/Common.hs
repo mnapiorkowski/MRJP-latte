@@ -1,25 +1,23 @@
-module Utils where
+module Common where
 
 import System.IO
 import System.Environment     (getArgs)
 import System.FilePath.Posix  (splitExtension)
 import System.Exit            (exitFailure)
 
-import qualified Control.Monad.Except as E ( throwError )
-import Control.Monad.Reader (lift)
 import Control.Exception
+
+import Data.Map (Map)
 
 import Latte.Abs
 import Latte.Print (printTree)
 
-import Frontend.Types
+type Pos = BNFC'Position
 
-showType :: Type -> String
-showType IntT = "int"
-showType BoolT = "bool"
-showType StringT = "string"
-showType VoidT = "void"
-showType (ArrayT t) = (showType t) ++ "[]"
+type FuncEnv = Map Ident (Type, [Type])
+
+data Type = IntT | StringT | BoolT | VoidT | ArrayT Type
+  deriving Eq
 
 convType :: TType -> Type
 convType (TInt _) = IntT
@@ -38,9 +36,6 @@ isArrayType _ = False
 posStr :: Pos -> String
 posStr Nothing = "in unknown position:\n"
 posStr (Just (l, c)) = "at line " ++ show l ++ ", column " ++ show c ++ ":\n"
-
-throwE :: Pos -> String -> TM a
-throwE pos s = lift $ E.throwError (posStr pos ++ s)
 
 printSuccess :: IO ()
 printSuccess = hPutStrLn stderr "OK"
