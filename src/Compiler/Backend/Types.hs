@@ -13,13 +13,16 @@ import Common
 
 type Code = DList String
 
-type Loc = Int
-data Register = Reg Loc | RegArg String
-data RegType = T Type | Ref Type
-type Var = (RegType, Register)
-data Val = VInt Integer | VFalse | VTrue | VVar Var
+data Symbol = NumSym Int | StrSym String
+data VarType = T Type | Ref Type | Arr (Int, Type)
+type Var = (VarType, Symbol)
+data Val = VInt Integer | VFalse | VTrue | VLocal Var | VGlobal Var
 
 type CEnv = FuncEnv
-type CState = (Map Ident Var, Loc)
+
+type Locals = Map Ident Var
+type Globals = Map Ident Var
+type CState = (Locals, Globals, Int, Int)
+
 type Result = Except String
 type CM a = StateT CState (ReaderT CEnv Result) a

@@ -179,7 +179,8 @@ typecheck p = do
         (Ident "printString", (VoidT, [StringT])),
         (Ident "error", (VoidT, [])),
         (Ident "readInt", (IntT, [])),
-        (Ident "readString", (StringT, []))
+        (Ident "readString", (StringT, [])),
+        (Ident "concatStrings", (StringT, [StringT, StringT]))
         ]
   let initContext = (Ident "")
   let initEnv = (initVarEnv, initFuncEnv, Set.empty)

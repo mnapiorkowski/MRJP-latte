@@ -10,7 +10,7 @@ import Latte.Abs
 import Common
 import Backend.Types
 import Backend.Utils
-import Backend.Generator.Expressions (genExpr)
+import Backend.Generator.Expressions (genExpr, genELVal)
 
 genSExp :: Expr -> CM Code
 genSExp e = do
@@ -20,17 +20,13 @@ genSExp e = do
 genInit :: Type -> Ident -> Expr -> CM Code
 genInit t id e = do
   (eCode, v) <- genExpr e
-  r <- newReg
-  let newVar = ((Ref t), r)
-  setVar id newVar
-  let alloca = DList.singleton $ (genReg r) ++ " = alloca " ++ (genType t)
+  sym <- newLocalSym
+  let newVar = ((Ref t), sym)
+  setLocal id newVar
+  let alloca = DList.singleton $ (genLocSymbol sym) ++ " = alloca " ++ (genType t)
   let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
-              ", " ++ (genTypedVal (VVar newVar))
-  return $ DList.concat [
-    eCode,
-    alloca,
-    store
-    ]
+              ", " ++ (genTypedVal (VLocal newVar))
+  return $ DList.concat [eCode, alloca, store]
 
 genNoInit :: Pos -> Type -> Ident -> CM Code
 genNoInit pos t id = case t of
@@ -58,12 +54,18 @@ genSDecl tt is = do
 genSAss :: LVal -> Expr -> CM Code
 genSAss lv e = case lv of
   LVar _ id -> do
-    var <- getVar id
-    (code, v) <- genExpr e
-    let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
-                ", " ++ (genTypedVal (VVar var))
-    return $ DList.concat [code, store]
+    var@(t, sym) <- getLocal id
+    case sym of
+      NumSym _ -> do
+        (code, v) <- genExpr e
+        let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
+                    ", " ++ (genTypedVal (VLocal var))
+        return $ DList.concat [code, store]
+      StrSym str -> genInit (convVarType t) id e
   -- LArr _ id e ->
+
+genSIncrDecr :: Pos -> LVal -> AddOp -> CM Code
+genSIncrDecr pos lv op = genSAss lv (EAdd pos (ELVal pos lv) op (ELitInt pos 1))
 
 genSRet :: Expr -> CM Code
 genSRet e = do
@@ -81,8 +83,8 @@ genStmt s = case s of
   SExp _ e -> genSExp e
   SDecl _ tt is -> genSDecl tt is
   SAss _ lv e -> genSAss lv e
-  -- SIncr _ lv -> genSIncr lv
-  -- SDecr pos lv -> checkSIncrDecr pos lv
+  SIncr pos lv -> genSIncrDecr pos lv (OPlus pos)
+  SDecr pos lv -> genSIncrDecr pos lv (OMinus pos)
   SRet _ e -> genSRet e
   SVRet _ -> genSVRet
   -- SIf pos e s -> checkSIf pos e s
@@ -99,8 +101,8 @@ genStmts (h:t) acc = do
 
 genBlock :: Block -> CM Code
 genBlock (BBlock _ ss) = do
-  (state, _) <- get
+  (locals, _, _, _) <- get
   code <- genStmts ss DList.empty
-  loc <- gets (\(_, loc) -> loc)
-  put (state, loc)
+  (_, globals, l, g) <- get
+  put (locals, globals, l, g)
   return code

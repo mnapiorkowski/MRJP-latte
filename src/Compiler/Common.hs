@@ -16,7 +16,7 @@ type Pos = BNFC'Position
 
 type FuncEnv = Map Ident (Type, [Type])
 
-data Type = IntT | StringT | BoolT | VoidT | ArrayT Type
+data Type = IntT | CharT | StringT | BoolT | VoidT | ArrayT Type
   deriving Eq
 
 convType :: TType -> Type

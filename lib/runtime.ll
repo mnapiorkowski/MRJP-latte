@@ -11,6 +11,9 @@ declare i32 @getline(i8**, i32*, i8*)
 declare i8* @malloc(i32)
 declare void @free(i8*)
 declare void @memcpy(i8*, i8*, i32)
+declare i32 @strlen(i8*)
+declare i8* @strcpy(i8*, i8*)
+declare i8* @strcat(i8*, i8*)
 declare void @exit(i32)
 
 define void @printInt(i32 %x) {
@@ -73,4 +76,15 @@ getline_error:
 end:
   call void @free(i8* %buff)
   ret i8* %line
+}
+
+define i8* @concatStrings(i8* %a, i8* %b) {
+  %len_a = call i32 @strlen(i8* %a)
+  %len_b = call i32 @strlen(i8* %b)
+  %len_a_b = add i32 %len_a, %len_b
+  %len = add i32 %len_a_b, 1
+  %buff = call i8* @malloc(i32 %len)
+  call i8* @strcpy(i8* %buff, i8* %a)
+  call i8* @strcat(i8* %buff, i8* %b)
+  ret i8* %buff
 }

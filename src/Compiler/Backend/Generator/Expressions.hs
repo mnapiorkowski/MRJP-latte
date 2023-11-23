@@ -11,20 +11,33 @@ import Common
 import Backend.Types
 import Backend.Utils
 
-import Data.Typeable
+genEString :: String -> CM (Code, Val)
+genEString s = do
+  res <- tryGetGlobal (Ident s)
+  (t, sym) <- case res of
+    Just var -> return var
+    Nothing -> do
+      g <- newGlobalSym
+      let newVar = (Arr ((1 + length s), CharT), g)
+      setGlobal (Ident s) newVar
+      return newVar
+  sym' <- newLocalSym
+  let bitcast = (genLocSymbol sym') ++ " = bitcast " ++ (genVarType t) ++ 
+                "* " ++ (genGlobSymbol sym) ++ " to " ++ (genType StringT)
+  return (DList.singleton bitcast, (VLocal (T StringT, sym')))
 
 genELVal :: LVal -> CM (Code, Val)
 genELVal lv = case lv of
   LVar _ id -> do
-    var@(t, r) <- getVar id
-    case r of
-      Reg _ -> do
+    var@(t, sym) <- getLocal id
+    case sym of
+      NumSym _ -> do
         let t' = dereference t
-        r <- newReg
-        let load = DList.singleton $ (genReg r) ++ " = load " ++ 
-                  (genRegType t') ++ ", " ++ genTypedVal (VVar var)
-        return (load, (VVar (t', r)))
-      RegArg str -> return (DList.empty, (VVar var))
+        sym' <- newLocalSym
+        let load = DList.singleton $ (genLocSymbol sym') ++ " = load " ++ 
+                  (genVarType t') ++ ", " ++ genTypedVal (VLocal var)
+        return (load, (VLocal (t', sym')))
+      StrSym str -> return (DList.empty, (VLocal var))
   -- LArr _ id e
 
 genEApp :: Ident -> [Expr] -> CM (Code, Val)
@@ -32,34 +45,67 @@ genEApp id es = do
   (code, vals) <- genExprs es (DList.empty, [])
   funcEnv <- ask
   let (t, _) = funcEnv Map.! id
-  r <- newReg
+  sym <- newLocalSym
   let assStr  | t == VoidT = ""
-              | otherwise = (genReg r) ++ " = "
+              | otherwise = (genLocSymbol sym) ++ " = "
   let call = DList.singleton $ assStr ++ "call " ++ (genType t) ++ 
               " @" ++ (genIdent id) ++ "(" ++ (genArgs vals) ++ ")"
-  return (DList.concat [code, call], (VVar ((T t), r)))
+  return (DList.concat [code, call], (VLocal ((T t), sym)))
+
+genBinaryOp :: Type -> Expr -> Expr -> String -> CM (Code, Val)
+genBinaryOp t e1 e2 instr = do
+  (c1, v1) <- genExpr e1
+  (c2, v2) <- genExpr e2
+  sym <- newLocalSym
+  let code = DList.singleton $ (genLocSymbol sym) ++ " = " ++ instr ++ " " ++ 
+            (genTypedVal v1) ++ ", " ++ (genVal v2)
+  return (DList.concat [c1, c2, code], (VLocal ((T t), sym)))
+
+genAddOp :: Expr -> AddOp -> Expr -> CM (Code, Val)
+genAddOp e1 op e2 = case op of
+  OMinus _ -> genBinaryOp IntT e1 e2 "sub"
+  OPlus _ -> do
+    (_, v) <- genExpr e1
+    case v of
+      VLocal (T StringT, _) -> genEApp (Ident "concatStrings") [e1, e2]
+      _ -> genBinaryOp IntT e1 e2 "add"
+
+genMulOp :: Expr -> MulOp -> Expr -> CM (Code, Val)
+genMulOp e1 op e2 = case op of
+  OTimes _ -> genBinaryOp IntT e1 e2 "mul"
+  ODiv _ -> genBinaryOp IntT e1 e2 "sdiv"
+  OMod _ -> genBinaryOp IntT e1 e2 "srem"
+
+genRelOp :: Expr -> RelOp -> Expr -> CM (Code, Val)
+genRelOp e1 op e2 = case op of
+  OLt _ -> genBinaryOp BoolT e1 e2 "icmp slt"
+  OLeq _ -> genBinaryOp BoolT e1 e2 "icmp sle"
+  OGt _ -> genBinaryOp BoolT e1 e2 "icmp sgt"
+  OGeq _ -> genBinaryOp BoolT e1 e2 "icmp sge"
+  OEq _ -> genBinaryOp BoolT e1 e2 "icmp eq"
+  ONeq _ -> genBinaryOp BoolT e1 e2 "icmp ne"
 
 genExpr :: Expr -> CM (Code, Val)
 genExpr e = case e of
   ELitInt _ i -> return (DList.empty, VInt i)
   ELitTrue _ -> return (DList.empty, VTrue)
   ELitFalse _ -> return (DList.empty, VFalse)
-  -- EString _ s -> return StringT
+  EString _ s -> genEString s
   ELVal _ lv -> genELVal lv
   EApp _ id es -> genEApp id es
   -- ENewArr pos tt e -> typeOfNewArr pos tt e
   -- EAttr pos e id -> typeOfAttr pos e id
-  -- ENeg pos e -> checkUnaryOp pos IntT e >> return IntT
-  -- ENot pos e -> checkUnaryOp pos BoolT e >> return BoolT
-  -- EMul pos e1 op e2 -> typeOfMulOp pos e1 op e2
-  -- EAdd pos e1 op e2 -> typeOfAddOp pos e1 op e2
-  -- ERel pos e1 op e2 -> typeOfRelOp pos e1 op e2
-  -- EAnd pos e1 e2 -> checkBinaryOp pos BoolT e1 e2 >> return BoolT
-  -- EOr pos e1 e2 -> checkBinaryOp pos BoolT e1 e2 >> return BoolT
+  ENeg pos e -> genAddOp (ELitInt pos 0) (OMinus pos) e
+  ENot pos e -> genRelOp (ELitFalse pos) (OEq pos) e
+  EMul _ e1 op e2 -> genMulOp e1 op e2
+  EAdd _ e1 op e2 -> genAddOp e1 op e2
+  ERel _ e1 op e2 -> genRelOp e1 op e2
+  EAnd _ e1 e2 -> genBinaryOp BoolT e1 e2 "and"
+  EOr _ e1 e2 -> genBinaryOp BoolT e1 e2 "or"
   _ -> return (DList.empty, VFalse)
 
 genExprs :: [Expr]-> (Code, [Val]) -> CM (Code, [Val])
-genExprs [] acc = return acc
+genExprs [] (codeAcc, valAcc) = return (codeAcc, reverse valAcc)
 genExprs (e:es) (codeAcc, valAcc) = do
   (code, val) <- genExpr e
   genExprs es ((DList.append codeAcc code), (val:valAcc))

@@ -34,16 +34,17 @@ declarations = DList.fromList [
   "declare void @error()",
   "declare i32 @readInt()",
   "declare i8* @readString()",
+  "declare i8* @concatStrings(i8*, i8*)",
   ""
   ]
 
 genParam :: Arg -> CM String
 genParam (AArg pos tt id@(Ident str)) = do
   let t = T $ convType tt
-  let r = RegArg str
-  let newVar = (t, r)
-  setVar id newVar
-  return $ genTypedVal (VVar newVar)
+  let sym = StrSym str
+  let newVar = (t, sym)
+  setLocal id newVar
+  return $ genTypedVal (VLocal newVar)
 
 genParams :: [Arg] -> CM String
 genParams [] = return ""
@@ -57,15 +58,18 @@ genParams (p:ps) = do
 genFunc :: Pos -> TType -> Ident -> [Arg] -> Block -> CM Code
 genFunc p tt (Ident id) as b = do
   let t = convType tt
-  modify (\(state, _) -> (state, 0))
+  modify (\(locals, globals, _, g) -> (locals, globals, 0, g))
   ps <- genParams as
   code <- genBlock b
-  return $ DList.concat [
-    DList.singleton ("define " ++ (genType t) ++ " @" ++ id ++ 
-      "(" ++ ps ++ ") {"),
-    code,
-    DList.fromList ["}", ""]
-    ]
+  let open = [
+            "", 
+            "define " ++ (genType t) ++ " " ++ (genGlobSymbol (StrSym id)) ++ 
+            "(" ++ ps ++ ") {"
+            ]
+  let lastInstr = last $ DList.toList code
+  let close | (t == VoidT) && (lastInstr /= "ret void") = ["ret void", "}"]
+            | otherwise = ["}"]
+  return $ DList.concat [DList.fromList open, code, DList.fromList close]
 
 genTopDef :: TopDef -> CM Code
 genTopDef d = case d of
@@ -78,18 +82,15 @@ genTopDefs (d:ds) acc = do
   genTopDefs ds (DList.append acc code)
 
 genProgr :: Program -> CM Code
-genProgr (Progr pos ds) = do
-  genTopDefs ds DList.empty
-
-compileProgr :: Program -> CM String
-compileProgr p = do
-  code <- genProgr p
-  pure $ indent $ DList.concat [declarations, code]
+genProgr (Progr pos ds) = genTopDefs ds DList.empty
 
 compile :: Program -> FuncEnv -> IO String
 compile p env = do
-  let initState = (Map.empty, 0)
-  let res = runExcept $ runReaderT (evalStateT (compileProgr p) initState) env
+  let initState = (Map.empty, Map.empty, 0, 0)
+  let res = runExcept $ runReaderT (runStateT (genProgr p) initState) env
   case res of
-    Left err -> printError ("semantic error " ++ err)
-    Right code -> return code
+    Left err -> printError ("compilation error " ++ err)
+    Right (code, (_, globals, _, _)) -> do
+      let strings = DList.fromList $ genGlobStrings globals
+      return $ indent $ DList.concat [declarations, strings, code]
+      
