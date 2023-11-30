@@ -16,7 +16,7 @@ type Code = DList String
 data Symbol = NumSym Int | StrSym String
 data VarType = T Type | Ref Type | Arr (Int, Type)
 type Var = (VarType, Symbol)
-data Val = VInt Integer | VFalse | VTrue | VLocal Var | VGlobal Var
+data Val = VConst Const | VLocal Var | VGlobal Var
 
 type CEnv = FuncEnv
 

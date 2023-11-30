@@ -25,9 +25,8 @@ genVarType (Ref t) = (genType t) ++ "*"
 genVarType (Arr (i, t)) = "[" ++ (show i) ++ " x " ++ (genType t) ++ "]"
 
 genValType :: Val -> String
-genValType (VInt _) = genType IntT
-genValType (VFalse) = genType BoolT
-genValType (VTrue) = genType BoolT
+genValType (VConst (CInt _)) = genType IntT
+genValType (VConst (CBool _)) = genType BoolT
 genValType (VLocal (t, _)) = genVarType t
 genValType (VGlobal (t, _)) = genVarType t
 
@@ -51,9 +50,9 @@ genTypedLabel :: Symbol -> String
 genTypedLabel s = "label " ++ genArgLabel s
 
 genVal :: Val -> String
-genVal (VInt i) = show i
-genVal (VFalse) = "false"
-genVal (VTrue) = "true"
+genVal (VConst (CInt i)) = show i
+genVal (VConst (CBool False)) = "false"
+genVal (VConst (CBool True)) = "true"
 genVal (VLocal (_, sym)) = genLocSymbol sym
 genVal (VGlobal (_, sym)) = genGlobSymbol sym
 

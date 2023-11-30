@@ -85,39 +85,14 @@ genRelOp e1 op e2 = case op of
   OEq _ -> genBinaryOp BoolT e1 e2 "icmp eq"
   ONeq _ -> genBinaryOp BoolT e1 e2 "icmp ne"
 
--- genEAnd :: Expr -> Expr -> CM (Code, Val)
--- genEAnd e1 e2 = do
---   (c1, v1) <- genExpr e1
---   lTrue <- newLabel
---   (c2, v2) <- genExpr e2
---   lFalse <- newLabel
---   lEnd <- newLabel
---   let br1 = DList.singleton $ "br " ++ (genTypedVal v1) ++ ", " ++ 
---           (genTypedLabel lTrue) ++ ", " ++ (genTypedLabel lFalse)
---   let br2 = DList.singleton $ "br " ++ (genTypedVal v2) ++ ", " ++ 
---           (genTypedLabel lEnd) ++ ", " ++ (genTypedLabel lFalse)
---   let br3 = DList.singleton $ "br " ++ (genTypedLabel lEnd)
---   let label1 = DList.singleton $ genLabel lTrue
---   let label2 = DList.singleton $ genLabel lFalse
---   let label3 = DList.singleton $ genLabel lEnd
---   sym <- newLocalSym
---   let phi = DList.singleton $ (genLocSymbol sym) ++ " = phi " ++ 
---             (genType BoolT) ++ " [" ++ (genVal VTrue) ++ ", " ++ 
---             (genArgLabel lTrue) ++ "], [" ++ (genVal VFalse) ++ 
---             ", " ++ (genArgLabel lFalse) ++ "]"
---   let code = DList.concat [
---               c1, br1, label1, c2, br2, label2, br3, label3, phi
---               ]
---   return (code, (VLocal ((T BoolT), sym)))
-
 genBoolOp :: Code -> Symbol -> Symbol -> Symbol -> CM (Code, Val)
 genBoolOp code lTrue lFalse lEnd = do
   let br3 = DList.singleton $ "br " ++ (genTypedLabel lEnd)
   let label3 = DList.singleton $ genLabel lEnd
   sym <- newLocalSym
   let phi = DList.singleton $ (genLocSymbol sym) ++ " = phi " ++ 
-            (genType BoolT) ++ " [" ++ (genVal VTrue) ++ ", " ++ 
-            (genArgLabel lTrue) ++ "], [" ++ (genVal VFalse) ++ 
+            (genType BoolT) ++ " [" ++ (genVal $ VConst (CBool True)) ++ ", " ++ 
+            (genArgLabel lTrue) ++ "], [" ++ (genVal $ VConst (CBool False)) ++ 
             ", " ++ (genArgLabel lFalse) ++ "]"
   return (DList.concat [code, br3, label3, phi], (VLocal ((T BoolT), sym)))
 
@@ -155,9 +130,9 @@ genEOr e1 e2 = do
 
 genExpr :: Expr -> CM (Code, Val)
 genExpr e = case e of
-  ELitInt _ i -> return (DList.empty, VInt i)
-  ELitTrue _ -> return (DList.empty, VTrue)
-  ELitFalse _ -> return (DList.empty, VFalse)
+  ELitInt _ i -> return (DList.empty, VConst (CInt i))
+  ELitTrue _ -> return (DList.empty, VConst (CBool True))
+  ELitFalse _ -> return (DList.empty, VConst (CBool False))
   EString _ s -> genEString s
   ELVal _ lv -> genELVal lv
   EApp _ id es -> genEApp id es
@@ -170,7 +145,7 @@ genExpr e = case e of
   ERel _ e1 op e2 -> genRelOp e1 op e2
   EAnd _ e1 e2 -> genEAnd e1 e2
   EOr _ e1 e2 -> genEOr e1 e2
-  _ -> return (DList.empty, VFalse)
+  _ -> return (DList.empty, VConst (CBool False))
 
 genExprs :: [Expr]-> (Code, [Val]) -> CM (Code, [Val])
 genExprs [] (codeAcc, valAcc) = return (codeAcc, reverse valAcc)

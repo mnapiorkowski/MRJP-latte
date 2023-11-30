@@ -19,6 +19,8 @@ type FuncEnv = Map Ident (Type, [Type])
 data Type = IntT | CharT | StringT | BoolT | VoidT | ArrayT Type
   deriving Eq
 
+data Const = CInt Integer | CBool Bool
+
 convType :: TType -> Type
 convType (TInt _) = IntT
 convType (TBool _) = BoolT
@@ -45,6 +47,16 @@ printError err = do
   hPutStrLn stderr "ERROR"
   hPutStrLn stderr err
   exitFailure
+
+tryEval :: Expr -> Maybe Const
+tryEval e = case e of
+  ELitInt _ i -> Just $ CInt i
+  ELitTrue _ -> Just $ CBool True
+  ELitFalse _ -> Just $ CBool False
+  ENot _ e -> case tryEval e of
+    Just (CBool b) -> Just $ CBool (not b)
+    Nothing -> Nothing
+  _ -> Nothing
 
 tryReadFile :: String -> IO String
 tryReadFile filePath = do

@@ -82,15 +82,6 @@ mergeEnv (varEnv, funcEnv, varsInBlock) = do
     let newVarsInBlock = Set.union oldVarsInBlock varsInBlock
     return (newVarEnv, newFuncEnv, newVarsInBlock)
 
-tryEval :: Expr -> Maybe Val
-tryEval e = case e of
-  ELitTrue _ -> Just $ BoolV True
-  ELitFalse _ -> Just $ BoolV False
-  ENot _ e -> case tryEval e of
-    Just (BoolV b) -> Just $ BoolV (not b)
-    Nothing -> Nothing
-  _ -> Nothing
-
 doesReturnOrLoopForever :: Stmt -> Bool
 doesReturnOrLoopForever s = case s of
   SRet _ _ -> True
@@ -98,21 +89,21 @@ doesReturnOrLoopForever s = case s of
   SExp _ (EApp _ (Ident "error") []) -> True
   SIf _ e s -> do
     case tryEval e of
-      Just (BoolV b) -> do
+      Just (CBool b) -> do
         if b == True    -- expression evaluates to True
           then doesReturnOrLoopForever s
         else False      -- expression evaluates to False
       Nothing -> False  -- could not evaluate expression 
   SIfElse _ e sIf sElse -> do
     case tryEval e of
-      Just (BoolV b) -> do
+      Just (CBool b) -> do
         if b == True
           then doesReturnOrLoopForever sIf
         else doesReturnOrLoopForever sElse
       Nothing -> (doesReturnOrLoopForever sIf) && (doesReturnOrLoopForever sElse)
   SWhile _ e s -> do
     case tryEval e of
-      Just (BoolV b) -> b
+      Just (CBool b) -> b
       Nothing -> False
   _ -> False
 

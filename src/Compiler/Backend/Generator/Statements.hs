@@ -77,52 +77,68 @@ genSVRet :: CM Code
 genSVRet = return $ DList.singleton "ret void"
 
 genSIf :: Expr -> Stmt -> CM Code
-genSIf e s = do
-  (cond, v) <- genExpr e
-  lIf <- newLabel
-  ifCode <- genStmt s
-  lEnd <- newLabel
-  let brCond = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++ 
-          (genTypedLabel lIf) ++ ", " ++ (genTypedLabel lEnd)
-  let label1 = DList.singleton $ genLabel lIf
-  let label2 = DList.singleton $ genLabel lEnd
-  let brEnd = DList.singleton $ "br " ++ (genTypedLabel lEnd)
-  return $ DList.concat [cond, brCond, label1, ifCode, brEnd, label2]
+genSIf e s = case tryEval e of
+  Just (CBool False) -> return DList.empty
+  Just (CBool True) -> genStmt s
+  _ -> do
+    (cond, v) <- genExpr e
+    lIf <- newLabel
+    ifCode <- genStmt s
+    lEnd <- newLabel
+    let brCond = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++ 
+            (genTypedLabel lIf) ++ ", " ++ (genTypedLabel lEnd)
+    let label1 = DList.singleton $ genLabel lIf
+    let label2 = DList.singleton $ genLabel lEnd
+    let brEnd = DList.singleton $ "br " ++ (genTypedLabel lEnd)
+    return $ DList.concat [cond, brCond, label1, ifCode, brEnd, label2]
 
 genSIfElse :: Expr -> Stmt -> Stmt -> CM Code
-genSIfElse e sIf sElse = do
-  (cond, v) <- genExpr e
-  lIf <- newLabel
-  ifCode <- genStmt sIf
-  lElse <- newLabel
-  elseCode <- genStmt sElse
-  lEnd <- newLabel
-  let brCond = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++ 
-          (genTypedLabel lIf) ++ ", " ++ (genTypedLabel lElse)
-  let brEnd = DList.singleton $ "br " ++ (genTypedLabel lEnd)
-  let label1 = DList.singleton $ genLabel lIf
-  let label2 = DList.singleton $ genLabel lElse
-  let label3 = DList.singleton $ genLabel lEnd
-  return $ DList.concat [
-    cond, brCond, label1, ifCode, brEnd, label2, elseCode, brEnd, label3
-    ]
+genSIfElse e sIf sElse = case tryEval e of
+  Just (CBool False) -> genStmt sElse
+  Just (CBool True) -> genStmt sIf
+  _ -> do
+    (cond, v) <- genExpr e
+    lIf <- newLabel
+    ifCode <- genStmt sIf
+    lElse <- newLabel
+    elseCode <- genStmt sElse
+    lEnd <- newLabel
+    let brCond = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++ 
+            (genTypedLabel lIf) ++ ", " ++ (genTypedLabel lElse)
+    let brEnd = DList.singleton $ "br " ++ (genTypedLabel lEnd)
+    let label1 = DList.singleton $ genLabel lIf
+    let label2 = DList.singleton $ genLabel lElse
+    let label3 = DList.singleton $ genLabel lEnd
+    return $ DList.concat [
+      cond, brCond, label1, ifCode, brEnd, label2, elseCode, brEnd, label3
+      ]
 
 genSWhile :: Expr -> Stmt -> CM Code
-genSWhile e s = do
-  lCond <- newLabel
-  (cond, v) <- genExpr e
-  lBody <- newLabel
-  body <- genStmt s
-  lEnd <- newLabel
-  let brBody = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++
-              (genTypedLabel lBody) ++ ", " ++ (genTypedLabel lEnd)
-  let brCond = DList.singleton $ "br " ++ (genTypedLabel lCond)
-  let label1 = DList.singleton $ genLabel lCond
-  let label2 = DList.singleton $ genLabel lBody
-  let label3 = DList.singleton $ genLabel lEnd
-  return $ DList.concat [
-    brCond, label1, cond, brBody, label2, body, brCond, label3
-    ]
+genSWhile e s = case tryEval e of
+  Just (CBool False) -> return DList.empty
+  Just (CBool True) -> do
+    lBody <- newLabel
+    body <- genStmt s
+    lEnd <- newLabel
+    let br = DList.singleton $ "br " ++ (genTypedLabel lBody)
+    let label1 = DList.singleton $ genLabel lBody
+    let label2 = DList.singleton $ genLabel lEnd
+    return $ DList.concat [br, label1, body, br, label2]
+  _ -> do
+    lCond <- newLabel
+    (cond, v) <- genExpr e
+    lBody <- newLabel
+    body <- genStmt s
+    lEnd <- newLabel
+    let brBody = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++
+                (genTypedLabel lBody) ++ ", " ++ (genTypedLabel lEnd)
+    let brCond = DList.singleton $ "br " ++ (genTypedLabel lCond)
+    let label1 = DList.singleton $ genLabel lCond
+    let label2 = DList.singleton $ genLabel lBody
+    let label3 = DList.singleton $ genLabel lEnd
+    return $ DList.concat [
+      brCond, label1, cond, brBody, label2, body, brCond, label3
+      ]
 
 genStmt :: Stmt -> CM Code
 genStmt s = case s of

@@ -14,8 +14,6 @@ import Latte.Abs (Ident, Expr)
 
 import Common
 
-data Val = IntV Integer | StringV String | BoolV Bool
-
 type VarEnv = Map Ident Type
 type VarsInBlock = Set Ident
 type Env = (VarEnv, FuncEnv, VarsInBlock)
