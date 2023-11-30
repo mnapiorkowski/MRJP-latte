@@ -22,7 +22,8 @@ type CEnv = FuncEnv
 
 type Locals = Map Ident Var
 type Globals = Map Ident Var
-type CState = (Locals, Globals, Int, Int)
+type Counters = (Int, Int, Int) -- locals, globals, labels
+type CState = (Locals, Globals, Counters)
 
 type Result = Except String
 type CM a = StateT CState (ReaderT CEnv Result) a

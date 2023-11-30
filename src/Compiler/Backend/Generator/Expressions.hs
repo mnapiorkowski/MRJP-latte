@@ -85,6 +85,74 @@ genRelOp e1 op e2 = case op of
   OEq _ -> genBinaryOp BoolT e1 e2 "icmp eq"
   ONeq _ -> genBinaryOp BoolT e1 e2 "icmp ne"
 
+-- genEAnd :: Expr -> Expr -> CM (Code, Val)
+-- genEAnd e1 e2 = do
+--   (c1, v1) <- genExpr e1
+--   lTrue <- newLabel
+--   (c2, v2) <- genExpr e2
+--   lFalse <- newLabel
+--   lEnd <- newLabel
+--   let br1 = DList.singleton $ "br " ++ (genTypedVal v1) ++ ", " ++ 
+--           (genTypedLabel lTrue) ++ ", " ++ (genTypedLabel lFalse)
+--   let br2 = DList.singleton $ "br " ++ (genTypedVal v2) ++ ", " ++ 
+--           (genTypedLabel lEnd) ++ ", " ++ (genTypedLabel lFalse)
+--   let br3 = DList.singleton $ "br " ++ (genTypedLabel lEnd)
+--   let label1 = DList.singleton $ genLabel lTrue
+--   let label2 = DList.singleton $ genLabel lFalse
+--   let label3 = DList.singleton $ genLabel lEnd
+--   sym <- newLocalSym
+--   let phi = DList.singleton $ (genLocSymbol sym) ++ " = phi " ++ 
+--             (genType BoolT) ++ " [" ++ (genVal VTrue) ++ ", " ++ 
+--             (genArgLabel lTrue) ++ "], [" ++ (genVal VFalse) ++ 
+--             ", " ++ (genArgLabel lFalse) ++ "]"
+--   let code = DList.concat [
+--               c1, br1, label1, c2, br2, label2, br3, label3, phi
+--               ]
+--   return (code, (VLocal ((T BoolT), sym)))
+
+genBoolOp :: Code -> Symbol -> Symbol -> Symbol -> CM (Code, Val)
+genBoolOp code lTrue lFalse lEnd = do
+  let br3 = DList.singleton $ "br " ++ (genTypedLabel lEnd)
+  let label3 = DList.singleton $ genLabel lEnd
+  sym <- newLocalSym
+  let phi = DList.singleton $ (genLocSymbol sym) ++ " = phi " ++ 
+            (genType BoolT) ++ " [" ++ (genVal VTrue) ++ ", " ++ 
+            (genArgLabel lTrue) ++ "], [" ++ (genVal VFalse) ++ 
+            ", " ++ (genArgLabel lFalse) ++ "]"
+  return (DList.concat [code, br3, label3, phi], (VLocal ((T BoolT), sym)))
+
+genEAnd :: Expr -> Expr -> CM (Code, Val)
+genEAnd e1 e2 = do
+  (c1, v1) <- genExpr e1
+  lTrue <- newLabel
+  (c2, v2) <- genExpr e2
+  lFalse <- newLabel
+  lEnd <- newLabel
+  let br1 = DList.singleton $ "br " ++ (genTypedVal v1) ++ ", " ++ 
+          (genTypedLabel lTrue) ++ ", " ++ (genTypedLabel lFalse)
+  let label1 = DList.singleton $ genLabel lTrue
+  let br2 = DList.singleton $ "br " ++ (genTypedVal v2) ++ ", " ++ 
+          (genTypedLabel lEnd) ++ ", " ++ (genTypedLabel lFalse)
+  let label2 = DList.singleton $ genLabel lFalse
+  let code = DList.concat [c1, br1, label1, c2, br2, label2]
+  genBoolOp code lTrue lFalse lEnd
+
+genEOr :: Expr -> Expr -> CM (Code, Val)
+genEOr e1 e2 = do
+  (c1, v1) <- genExpr e1
+  lFalse <- newLabel
+  (c2, v2) <- genExpr e2
+  lTrue <- newLabel
+  lEnd <- newLabel
+  let br1 = DList.singleton $ "br " ++ (genTypedVal v1) ++ ", " ++ 
+          (genTypedLabel lTrue) ++ ", " ++ (genTypedLabel lFalse)
+  let label2 = DList.singleton $ genLabel lTrue
+  let br2 = DList.singleton $ "br " ++ (genTypedVal v2) ++ ", " ++ 
+          (genTypedLabel lTrue) ++ ", " ++ (genTypedLabel lEnd)
+  let label1 = DList.singleton $ genLabel lFalse
+  let code = DList.concat [c1, br1, label1, c2, br2, label2]
+  genBoolOp code lTrue lFalse lEnd
+
 genExpr :: Expr -> CM (Code, Val)
 genExpr e = case e of
   ELitInt _ i -> return (DList.empty, VInt i)
@@ -100,8 +168,8 @@ genExpr e = case e of
   EMul _ e1 op e2 -> genMulOp e1 op e2
   EAdd _ e1 op e2 -> genAddOp e1 op e2
   ERel _ e1 op e2 -> genRelOp e1 op e2
-  EAnd _ e1 e2 -> genBinaryOp BoolT e1 e2 "and"
-  EOr _ e1 e2 -> genBinaryOp BoolT e1 e2 "or"
+  EAnd _ e1 e2 -> genEAnd e1 e2
+  EOr _ e1 e2 -> genEOr e1 e2
   _ -> return (DList.empty, VFalse)
 
 genExprs :: [Expr]-> (Code, [Val]) -> CM (Code, [Val])

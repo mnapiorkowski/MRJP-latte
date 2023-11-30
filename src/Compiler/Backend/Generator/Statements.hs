@@ -76,6 +76,54 @@ genSRet e = do
 genSVRet :: CM Code
 genSVRet = return $ DList.singleton "ret void"
 
+genSIf :: Expr -> Stmt -> CM Code
+genSIf e s = do
+  (cond, v) <- genExpr e
+  lIf <- newLabel
+  ifCode <- genStmt s
+  lEnd <- newLabel
+  let brCond = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++ 
+          (genTypedLabel lIf) ++ ", " ++ (genTypedLabel lEnd)
+  let label1 = DList.singleton $ genLabel lIf
+  let label2 = DList.singleton $ genLabel lEnd
+  let brEnd = DList.singleton $ "br " ++ (genTypedLabel lEnd)
+  return $ DList.concat [cond, brCond, label1, ifCode, brEnd, label2]
+
+genSIfElse :: Expr -> Stmt -> Stmt -> CM Code
+genSIfElse e sIf sElse = do
+  (cond, v) <- genExpr e
+  lIf <- newLabel
+  ifCode <- genStmt sIf
+  lElse <- newLabel
+  elseCode <- genStmt sElse
+  lEnd <- newLabel
+  let brCond = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++ 
+          (genTypedLabel lIf) ++ ", " ++ (genTypedLabel lElse)
+  let brEnd = DList.singleton $ "br " ++ (genTypedLabel lEnd)
+  let label1 = DList.singleton $ genLabel lIf
+  let label2 = DList.singleton $ genLabel lElse
+  let label3 = DList.singleton $ genLabel lEnd
+  return $ DList.concat [
+    cond, brCond, label1, ifCode, brEnd, label2, elseCode, brEnd, label3
+    ]
+
+genSWhile :: Expr -> Stmt -> CM Code
+genSWhile e s = do
+  lCond <- newLabel
+  (cond, v) <- genExpr e
+  lBody <- newLabel
+  body <- genStmt s
+  lEnd <- newLabel
+  let brBody = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++
+              (genTypedLabel lBody) ++ ", " ++ (genTypedLabel lEnd)
+  let brCond = DList.singleton $ "br " ++ (genTypedLabel lCond)
+  let label1 = DList.singleton $ genLabel lCond
+  let label2 = DList.singleton $ genLabel lBody
+  let label3 = DList.singleton $ genLabel lEnd
+  return $ DList.concat [
+    brCond, label1, cond, brBody, label2, body, brCond, label3
+    ]
+
 genStmt :: Stmt -> CM Code
 genStmt s = case s of
   SEmpty _ -> return DList.empty
@@ -87,9 +135,9 @@ genStmt s = case s of
   SDecr pos lv -> genSIncrDecr pos lv (OMinus pos)
   SRet _ e -> genSRet e
   SVRet _ -> genSVRet
-  -- SIf pos e s -> checkSIf pos e s
-  -- SIfElse pos e sIf sElse -> checkSIfElse pos e sIf sElse
-  -- SWhile pos e s -> checkSWhile pos e s
+  SIf _ e s -> genSIf e s
+  SIfElse _ e sIf sElse -> genSIfElse e sIf sElse
+  SWhile _ e s -> genSWhile e s
   -- SFor pos tt id e s -> checkSFor pos tt id e s
   _ -> return DList.empty
 
@@ -101,8 +149,8 @@ genStmts (h:t) acc = do
 
 genBlock :: Block -> CM Code
 genBlock (BBlock _ ss) = do
-  (locals, _, _, _) <- get
+  (locals, _, _) <- get
   code <- genStmts ss DList.empty
-  (_, globals, l, g) <- get
-  put (locals, globals, l, g)
+  (_, globals, counters) <- get
+  put (locals, globals, counters)
   return code

@@ -39,6 +39,17 @@ genGlobSymbol :: Symbol -> String
 genGlobSymbol (NumSym i) = "@_" ++ show i
 genGlobSymbol (StrSym s) = "@" ++ s
 
+genLabel :: Symbol -> String
+genLabel (NumSym i) = "L" ++ show i ++ ":"
+genLabel (StrSym s) = "L" ++ s ++ ":"
+
+genArgLabel :: Symbol -> String
+genArgLabel (NumSym i) = "%L" ++ show i
+genArgLabel (StrSym s) = "%L" ++ s
+
+genTypedLabel :: Symbol -> String
+genTypedLabel s = "label " ++ genArgLabel s
+
 genVal :: Val -> String
 genVal (VInt i) = show i
 genVal (VFalse) = "false"
@@ -61,32 +72,41 @@ convVarType (Ref t) = t
 
 newLocalSym :: CM Symbol
 newLocalSym = do
-  newId <- gets (\(_, _, l, _) -> l)
-  modify (\(locals, globals, l, g) -> (locals, globals, succ l, g))
+  newId <- gets (\(_, _, (l, _, _)) -> l)
+  modify (\(locals, globals, (l, g, lab)) -> 
+    (locals, globals, (succ l, g, lab)))
   return $ NumSym newId
 
 setLocal :: Ident -> Var -> CM ()
-setLocal id var = modify (\(locals, globals, l, g) -> 
-  (Map.insert id var locals, globals, l, g))
+setLocal id var = modify (\(locals, globals, counters) -> 
+  (Map.insert id var locals, globals, counters))
 
 getLocal :: Ident -> CM Var
-getLocal id = gets (\(locals, _, _, _) -> locals Map.! id)
+getLocal id = gets (\(locals, _, _) -> locals Map.! id)
 
 newGlobalSym :: CM Symbol
 newGlobalSym = do
-  newId <- gets (\(_, _, _, g) -> g)
-  modify (\(locals, globals, l, g) -> (locals, globals, l, succ g))
+  newId <- gets (\(_, _, (_, g, _)) -> g)
+  modify (\(locals, globals, (l, g, lab)) -> 
+    (locals, globals, (l, succ g, lab)))
   return $ NumSym newId
 
 setGlobal :: Ident -> Var -> CM ()
-setGlobal id var = modify (\(locals, globals, l, g) -> 
-  (locals, Map.insert id var globals, l, g))
+setGlobal id var = modify (\(locals, globals, counters) -> 
+  (locals, Map.insert id var globals, counters))
 
 getGlobal :: Ident -> CM Var
-getGlobal id = gets (\(_, globals, _, _) -> globals Map.! id)
+getGlobal id = gets (\(_, globals, _) -> globals Map.! id)
 
 tryGetGlobal :: Ident -> CM (Maybe Var)
-tryGetGlobal id = gets (\(_, globals, _, _) -> Map.lookup id globals)
+tryGetGlobal id = gets (\(_, globals, _) -> Map.lookup id globals)
+
+newLabel :: CM Symbol
+newLabel = do
+  newId <- gets (\(_, _, (_, _, lab)) -> lab)
+  modify (\(locals, globals, (l, g, lab)) -> 
+    (locals, globals, (l, g, succ lab)))
+  return $ NumSym newId
 
 genArgs :: [Val] -> String
 genArgs [] = ""

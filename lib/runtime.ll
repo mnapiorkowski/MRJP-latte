@@ -41,8 +41,8 @@ define i32 @readInt() {
 entry:	
   %res = alloca i32
   store i32 0, i32* %res
-  %d = getelementptr [3 x i8], [3 x i8]* @d, i32 0, i32 0
-	call i32 (i8*, ...) @scanf(i8* %d, i32* %res)
+  %dnl = getelementptr [4 x i8], [4 x i8]* @dnl, i32 0, i32 0
+	call i32 (i8*, ...) @scanf(i8* %dnl, i32* %res)
 	%res_val = load i32, i32* %res
 	ret i32 %res_val
 }

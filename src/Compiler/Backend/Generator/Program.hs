@@ -8,7 +8,7 @@ import Control.Monad.Reader
 
 import qualified Data.Map as Map
 import qualified Data.DList as DList
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, isSuffixOf)
 
 import Latte.Abs
 
@@ -20,7 +20,8 @@ import Backend.Generator.Statements (genBlock)
 indentLine :: String -> String
 indentLine line =
   if null line ||
-     any (`isPrefixOf` line) ["@", "}", "declare", "define"] 
+     any (`isPrefixOf` line) ["@", "}", "declare", "define"]  ||
+     ":" `isSuffixOf` line
   then line ++ "\n"
   else "\t" ++ line ++ "\n"
 
@@ -58,7 +59,7 @@ genParams (p:ps) = do
 genFunc :: Pos -> TType -> Ident -> [Arg] -> Block -> CM Code
 genFunc p tt (Ident id) as b = do
   let t = convType tt
-  modify (\(locals, globals, _, g) -> (locals, globals, 0, g))
+  modify (\(locals, globals, (_, g, _)) -> (locals, globals, (0, g, 0)))
   ps <- genParams as
   code <- genBlock b
   let open = [
@@ -66,8 +67,10 @@ genFunc p tt (Ident id) as b = do
             "define " ++ (genType t) ++ " " ++ (genGlobSymbol (StrSym id)) ++ 
             "(" ++ ps ++ ") {"
             ]
-  let lastInstr = last $ DList.toList code
-  let close | (t == VoidT) && (lastInstr /= "ret void") = ["ret void", "}"]
+  let instrList = DList.toList code
+  let close | (null instrList) || 
+              ((t == VoidT) && ((last instrList) /= "ret void")) = 
+                ["ret void", "}"]
             | otherwise = ["}"]
   return $ DList.concat [DList.fromList open, code, DList.fromList close]
 
@@ -86,11 +89,11 @@ genProgr (Progr pos ds) = genTopDefs ds DList.empty
 
 compile :: Program -> FuncEnv -> IO String
 compile p env = do
-  let initState = (Map.empty, Map.empty, 0, 0)
+  let initState = (Map.empty, Map.empty, (0, 0, 0))
   let res = runExcept $ runReaderT (runStateT (genProgr p) initState) env
   case res of
     Left err -> printError ("compilation error " ++ err)
-    Right (code, (_, globals, _, _)) -> do
+    Right (code, (_, globals, _)) -> do
       let strings = DList.fromList $ genGlobStrings globals
       return $ indent $ DList.concat [declarations, strings, code]
       

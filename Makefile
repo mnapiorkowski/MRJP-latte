@@ -8,7 +8,7 @@ DEV_NULL=/dev/null
 
 .PHONY: clean
 
-all: grammar runtime llvm
+all: grammar runtime latc_llvm latc
 
 grammar: ${SRC_DIR}/Latte.cf
 	@cd ${SRC_DIR} && \
@@ -18,11 +18,14 @@ grammar: ${SRC_DIR}/Latte.cf
 runtime: ${LIB_DIR}/runtime.ll
 	@${LLVM_AS} -o ${LIB_DIR}/runtime.bc ${LIB_DIR}/runtime.ll
 	
-llvm: ${SRC_DIR}/Compiler/Main.hs
+latc_llvm: $(shell find ${SRC_DIR}/Compiler -type f)
 	@${GHC} ${SRC_DIR}/Compiler/Main.hs -package mtl -package dlist \
 	-i${SRC_DIR}/Compiler -i${SRC_DIR} -outputdir ${BUILD_DIR} -o latc_llvm \
 	> ${DEV_NULL}
+
+latc: latc_llvm
+	@cp latc_llvm latc
 	
 clean:
 	@rm -rf ${SRC_DIR}/Latte ${SRC_DIR}/Makefile ${LIB_DIR}/runtime.bc \
-	${BUILD_DIR} latc_llvm
+	${BUILD_DIR} latc_llvm latc
