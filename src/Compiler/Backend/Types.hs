@@ -12,6 +12,7 @@ import Latte.Abs (Ident, Expr)
 import Common
 
 type Code = DList String
+type HasRet = Bool
 
 data Symbol = NumSym Int | StrSym String
 data VarType = T Type | Ref Type | Arr (Int, Type)

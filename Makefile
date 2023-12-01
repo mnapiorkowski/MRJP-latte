@@ -18,7 +18,7 @@ grammar: ${SRC_DIR}/Latte.cf
 runtime: ${LIB_DIR}/runtime.ll
 	@${LLVM_AS} -o ${LIB_DIR}/runtime.bc ${LIB_DIR}/runtime.ll
 	
-latc_llvm: $(shell find ${SRC_DIR}/Compiler -type f)
+latc_llvm: grammar runtime
 	@${GHC} ${SRC_DIR}/Compiler/Main.hs -package mtl -package dlist \
 	-i${SRC_DIR}/Compiler -i${SRC_DIR} -outputdir ${BUILD_DIR} -o latc_llvm \
 	> ${DEV_NULL}

@@ -99,34 +99,40 @@ genBoolOp code lTrue lFalse lEnd = do
 genEAnd :: Expr -> Expr -> CM (Code, Val)
 genEAnd e1 e2 = do
   (c1, v1) <- genExpr e1
-  lTrue <- newLabel
+  lSecond <- newLabel
   (c2, v2) <- genExpr e2
+  lAfterSecond <- newLabel
   lFalse <- newLabel
   lEnd <- newLabel
   let br1 = DList.singleton $ "br " ++ (genTypedVal v1) ++ ", " ++ 
-          (genTypedLabel lTrue) ++ ", " ++ (genTypedLabel lFalse)
-  let label1 = DList.singleton $ genLabel lTrue
-  let br2 = DList.singleton $ "br " ++ (genTypedVal v2) ++ ", " ++ 
+          (genTypedLabel lSecond) ++ ", " ++ (genTypedLabel lFalse)
+  let label1 = DList.singleton $ genLabel lSecond
+  let br2 = DList.singleton $ "br " ++ (genTypedLabel lAfterSecond)
+  let label2 = DList.singleton $ genLabel lAfterSecond
+  let br3 = DList.singleton $ "br " ++ (genTypedVal v2) ++ ", " ++ 
           (genTypedLabel lEnd) ++ ", " ++ (genTypedLabel lFalse)
-  let label2 = DList.singleton $ genLabel lFalse
-  let code = DList.concat [c1, br1, label1, c2, br2, label2]
-  genBoolOp code lTrue lFalse lEnd
+  let label3 = DList.singleton $ genLabel lFalse
+  let code = DList.concat [c1, br1, label1, c2, br2, label2, br3, label3]
+  genBoolOp code lAfterSecond lFalse lEnd
 
 genEOr :: Expr -> Expr -> CM (Code, Val)
 genEOr e1 e2 = do
   (c1, v1) <- genExpr e1
-  lFalse <- newLabel
+  lSecond <- newLabel
   (c2, v2) <- genExpr e2
+  lAfterSecond <- newLabel
   lTrue <- newLabel
   lEnd <- newLabel
   let br1 = DList.singleton $ "br " ++ (genTypedVal v1) ++ ", " ++ 
-          (genTypedLabel lTrue) ++ ", " ++ (genTypedLabel lFalse)
-  let label2 = DList.singleton $ genLabel lTrue
-  let br2 = DList.singleton $ "br " ++ (genTypedVal v2) ++ ", " ++ 
+          (genTypedLabel lTrue) ++ ", " ++ (genTypedLabel lSecond)
+  let label1 = DList.singleton $ genLabel lSecond
+  let br2 = DList.singleton $ "br " ++ (genTypedLabel lAfterSecond)
+  let label2 = DList.singleton $ genLabel lAfterSecond
+  let br3 = DList.singleton $ "br " ++ (genTypedVal v2) ++ ", " ++ 
           (genTypedLabel lTrue) ++ ", " ++ (genTypedLabel lEnd)
-  let label1 = DList.singleton $ genLabel lFalse
-  let code = DList.concat [c1, br1, label1, c2, br2, label2]
-  genBoolOp code lTrue lFalse lEnd
+  let label3 = DList.singleton $ genLabel lTrue
+  let code = DList.concat [c1, br1, label1, c2, br2, label2, br3, label3]
+  genBoolOp code lTrue lAfterSecond lEnd
 
 genExpr :: Expr -> CM (Code, Val)
 genExpr e = case e of

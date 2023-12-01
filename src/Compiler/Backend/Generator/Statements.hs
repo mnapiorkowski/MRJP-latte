@@ -12,10 +12,10 @@ import Backend.Types
 import Backend.Utils
 import Backend.Generator.Expressions (genExpr, genELVal)
 
-genSExp :: Expr -> CM Code
+genSExp :: Expr -> CM (Code, HasRet)
 genSExp e = do
   (code, _) <- genExpr e
-  return code
+  return (code, False)
 
 genInit :: Type -> Ident -> Expr -> CM Code
 genInit t id e = do
@@ -46,12 +46,13 @@ genDecls t (i:is) acc = do
   code <- genDecl t i
   genDecls t is (DList.append acc code)
 
-genSDecl :: TType -> [Item] -> CM Code
+genSDecl :: TType -> [Item] -> CM (Code, HasRet)
 genSDecl tt is = do
   let t = convType tt
-  genDecls t is DList.empty
+  code <- genDecls t is DList.empty
+  return (code, False)
 
-genSAss :: LVal -> Expr -> CM Code
+genSAss :: LVal -> Expr -> CM (Code, HasRet)
 genSAss lv e = case lv of
   LVar _ id -> do
     var@(t, sym) <- getLocal id
@@ -60,89 +61,110 @@ genSAss lv e = case lv of
         (code, v) <- genExpr e
         let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
                     ", " ++ (genTypedVal (VLocal var))
-        return $ DList.concat [code, store]
-      StrSym str -> genInit (convVarType t) id e
+        return (DList.concat [code, store], False)
+      StrSym str -> do
+        code <- genInit (convVarType t) id e
+        return (code, False)
   -- LArr _ id e ->
 
-genSIncrDecr :: Pos -> LVal -> AddOp -> CM Code
+genSIncrDecr :: Pos -> LVal -> AddOp -> CM (Code, HasRet)
 genSIncrDecr pos lv op = genSAss lv (EAdd pos (ELVal pos lv) op (ELitInt pos 1))
 
-genSRet :: Expr -> CM Code
+genSRet :: Expr -> CM (Code, HasRet)
 genSRet e = do
   (code, v) <- genExpr e
   let ret = DList.singleton $ "ret " ++ genTypedVal v
-  return $ DList.concat [code, ret]
+  return (DList.concat [code, ret], True)
 
-genSVRet :: CM Code
-genSVRet = return $ DList.singleton "ret void"
+genSVRet :: CM (Code, HasRet)
+genSVRet = return (DList.singleton ("ret " ++ (genType VoidT)), True)
 
-genSIf :: Expr -> Stmt -> CM Code
+genSIf :: Expr -> Stmt -> CM (Code, HasRet)
 genSIf e s = case tryEval e of
-  Just (CBool False) -> return DList.empty
+  Just (CBool False) -> return (DList.empty, False)
   Just (CBool True) -> genStmt s
   _ -> do
     (cond, v) <- genExpr e
     lIf <- newLabel
-    ifCode <- genStmt s
+    (ifCode, hasRet) <- genStmt s
     lEnd <- newLabel
     let brCond = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++ 
             (genTypedLabel lIf) ++ ", " ++ (genTypedLabel lEnd)
     let label1 = DList.singleton $ genLabel lIf
     let label2 = DList.singleton $ genLabel lEnd
-    let brEnd = DList.singleton $ "br " ++ (genTypedLabel lEnd)
-    return $ DList.concat [cond, brCond, label1, ifCode, brEnd, label2]
+    if hasRet
+      then return (DList.concat [cond, brCond, label1, ifCode, label2], False)
+    else do
+      let brEnd = DList.singleton $ "br " ++ (genTypedLabel lEnd)
+      return (DList.concat [cond, brCond, label1, ifCode, brEnd, label2], False)
 
-genSIfElse :: Expr -> Stmt -> Stmt -> CM Code
+genSIfElse :: Expr -> Stmt -> Stmt -> CM (Code, HasRet)
 genSIfElse e sIf sElse = case tryEval e of
   Just (CBool False) -> genStmt sElse
   Just (CBool True) -> genStmt sIf
   _ -> do
     (cond, v) <- genExpr e
     lIf <- newLabel
-    ifCode <- genStmt sIf
+    (ifCode, hasIfRet) <- genStmt sIf
     lElse <- newLabel
-    elseCode <- genStmt sElse
-    lEnd <- newLabel
+    (elseCode, hasElseRet) <- genStmt sElse
     let brCond = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++ 
-            (genTypedLabel lIf) ++ ", " ++ (genTypedLabel lElse)
-    let brEnd = DList.singleton $ "br " ++ (genTypedLabel lEnd)
+                (genTypedLabel lIf) ++ ", " ++ (genTypedLabel lElse)
     let label1 = DList.singleton $ genLabel lIf
     let label2 = DList.singleton $ genLabel lElse
-    let label3 = DList.singleton $ genLabel lEnd
-    return $ DList.concat [
-      cond, brCond, label1, ifCode, brEnd, label2, elseCode, brEnd, label3
-      ]
+    if (hasIfRet && hasElseRet)
+      then return (DList.concat [
+        cond, brCond, label1, ifCode, label2, elseCode
+        ], True)
+    else do
+      lEnd <- newLabel
+      let brEnd = DList.singleton $ "br " ++ (genTypedLabel lEnd)
+      let label3 = DList.singleton $ genLabel lEnd
+      return (DList.concat [
+        cond, brCond, label1, ifCode, brEnd, label2, elseCode, brEnd, label3
+        ], False)
 
-genSWhile :: Expr -> Stmt -> CM Code
+genSWhile :: Expr -> Stmt -> CM (Code, HasRet)
 genSWhile e s = case tryEval e of
-  Just (CBool False) -> return DList.empty
+  Just (CBool False) -> return (DList.empty, False)
   Just (CBool True) -> do
-    lBody <- newLabel
-    body <- genStmt s
-    lEnd <- newLabel
-    let br = DList.singleton $ "br " ++ (genTypedLabel lBody)
-    let label1 = DList.singleton $ genLabel lBody
-    let label2 = DList.singleton $ genLabel lEnd
-    return $ DList.concat [br, label1, body, br, label2]
+    (body, hasRet) <- genStmt s
+    if hasRet
+      then return (body, True)
+    else do
+      lBody <- newLabel
+      lEnd <- newLabel
+      let br = DList.singleton $ "br " ++ (genTypedLabel lBody)
+      let label1 = DList.singleton $ genLabel lBody
+      let label2 = DList.singleton $ genLabel lEnd
+      return (DList.concat [br, label1, body, br, label2], False)
   _ -> do
     lCond <- newLabel
     (cond, v) <- genExpr e
     lBody <- newLabel
-    body <- genStmt s
-    lEnd <- newLabel
-    let brBody = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++
-                (genTypedLabel lBody) ++ ", " ++ (genTypedLabel lEnd)
-    let brCond = DList.singleton $ "br " ++ (genTypedLabel lCond)
+    (body, hasRet) <- genStmt s
     let label1 = DList.singleton $ genLabel lCond
     let label2 = DList.singleton $ genLabel lBody
-    let label3 = DList.singleton $ genLabel lEnd
-    return $ DList.concat [
-      brCond, label1, cond, brBody, label2, body, brCond, label3
-      ]
+    if hasRet
+      then do
+        let brCond = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++ 
+                    (genTypedLabel lCond) ++ ", " ++ (genTypedLabel lBody)
+        return (DList.concat [
+          cond, brCond, label1, body, label2
+          ], False)
+    else do
+      lEnd <- newLabel
+      let brBody = DList.singleton $ "br " ++ (genTypedVal v) ++ ", " ++
+                  (genTypedLabel lBody) ++ ", " ++ (genTypedLabel lEnd)
+      let brCond = DList.singleton $ "br " ++ (genTypedLabel lCond)
+      let label3 = DList.singleton $ genLabel lEnd
+      return (DList.concat [
+        brCond, label1, cond, brBody, label2, body, brCond, label3
+        ], False)
 
-genStmt :: Stmt -> CM Code
+genStmt :: Stmt -> CM (Code, HasRet)
 genStmt s = case s of
-  SEmpty _ -> return DList.empty
+  SEmpty _ -> return (DList.empty, False)
   SBlock _ b -> genBlock b
   SExp _ e -> genSExp e
   SDecl _ tt is -> genSDecl tt is
@@ -155,18 +177,21 @@ genStmt s = case s of
   SIfElse _ e sIf sElse -> genSIfElse e sIf sElse
   SWhile _ e s -> genSWhile e s
   -- SFor pos tt id e s -> checkSFor pos tt id e s
-  _ -> return DList.empty
+  _ -> return (DList.empty, False)
 
-genStmts :: [Stmt]-> Code -> CM Code
-genStmts [] acc = return acc
+genStmts :: [Stmt]-> Code -> CM (Code, HasRet)
+genStmts [] acc = return (acc, False)
 genStmts (h:t) acc = do
-  code <- genStmt h
-  genStmts t (DList.append acc code)
+  (code, hasRet) <- genStmt h
+  let acc' = DList.append acc code
+  if hasRet
+    then return (acc', True)
+  else genStmts t acc'
 
-genBlock :: Block -> CM Code
+genBlock :: Block -> CM (Code, HasRet)
 genBlock (BBlock _ ss) = do
   (locals, _, _) <- get
-  code <- genStmts ss DList.empty
+  res@(code, _) <- genStmts ss DList.empty
   (_, globals, counters) <- get
   put (locals, globals, counters)
-  return code
+  return res
