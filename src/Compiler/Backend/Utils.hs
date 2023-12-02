@@ -19,6 +19,14 @@ genType StringT = "i8*"
 genType VoidT = "void"
 genType (ArrayT t) = (genType t) ++ "*"
 
+genDefaultValue :: Type -> String
+genDefaultValue IntT = "i32 0"
+genDefaultValue BoolT = "i1 false"
+genDefaultValue CharT = "i8 0"
+genDefaultValue StringT = "i8* null"
+genDefaultValue VoidT = "void"
+genDefaultValue (ArrayT t) = (genType t) ++ "* null"
+
 genVarType :: VarType -> String
 genVarType (T t) = genType t
 genVarType (Ref t) = (genType t) ++ "*"
@@ -118,7 +126,14 @@ genArgs (v:vs) = do
 
 genGlobString :: Ident -> Var -> String
 genGlobString (Ident s) (t, sym) = (genGlobSymbol sym) ++ 
-  " = private constant " ++ (genVarType t) ++ " c\"" ++ s ++ "\\00\""
+  " = private constant " ++ (genVarType t) ++ " c\"" ++ escape s ++ "\\00\""
+  where
+    escape [] = []
+    escape ('\t' : t) = '\\' : '0' : '9' : escape t
+    escape ('\n' : t) = '\\' : '0' : 'A' : escape t
+    escape ('"' : t) = '\\' : '2' : '2' : escape t
+    escape ('\\' : t) = '\\': '5' : 'C' : escape t
+    escape (h : t) = h : escape t
 
 genGlobStrings :: Globals -> [String]
 genGlobStrings globals = Map.elems (Map.mapWithKey genGlobString globals)

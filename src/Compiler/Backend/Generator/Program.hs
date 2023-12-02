@@ -67,7 +67,7 @@ genFunc p tt (Ident id) as b = do
             "define " ++ (genType t) ++ " " ++ (genGlobSymbol (StrSym id)) ++ 
             "(" ++ ps ++ ") {"
             ]
-  let close | ((t == VoidT) && (not hasRet)) = ["ret void", "}"]
+  let close | (not hasRet) = ["ret " ++ (genDefaultValue t), "}"]
             | otherwise = ["}"]
   return $ DList.concat [DList.fromList open, code, DList.fromList close]
 

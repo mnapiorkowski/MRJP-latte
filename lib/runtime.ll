@@ -1,12 +1,12 @@
-@dnl = internal constant [4 x i8] c"%d\0A\00"
 @d   = internal constant [3 x i8] c"%d\00"
+@dnl = internal constant [4 x i8] c"%d\0A\00"
+@snl = internal constant [4 x i8] c"%s\0A\00"
 @err = internal constant [14 x i8] c"runtime error\00"
 
 @stdin = external global i8*
 
 declare i32 @printf(i8*, ...) 
 declare i32 @scanf(i8*, ...)
-declare i32 @puts(i8*)
 declare i32 @getline(i8**, i32*, i8*)
 declare i8* @malloc(i32)
 declare void @free(i8*)
@@ -25,14 +25,15 @@ entry:
 
 define void @printString(i8* %s) {
 entry: 
-  call i32 @puts(i8* %s)
+  %snl = getelementptr [4 x i8], [4 x i8]* @snl, i32 0, i32 0
+  call i32 (i8*, ...) @printf(i8* %snl, i8* %s)
 	ret void
 }
 
 define void @error() {
 entry:
   %err = getelementptr [14 x i8], [14 x i8]* @err, i32 0, i32 0
-  call i32 @puts(i8* %err)
+  call void @printString(i8* %err)
   call void @exit(i32 1)
   ret void
 }
@@ -41,8 +42,8 @@ define i32 @readInt() {
 entry:	
   %res = alloca i32
   store i32 0, i32* %res
-  %dnl = getelementptr [4 x i8], [4 x i8]* @dnl, i32 0, i32 0
-	call i32 (i8*, ...) @scanf(i8* %dnl, i32* %res)
+  %d = getelementptr [3 x i8], [3 x i8]* @d, i32 0, i32 0
+	call i32 (i8*, ...) @scanf(i8* %d, i32* %res)
 	%res_val = load i32, i32* %res
 	ret i32 %res_val
 }
