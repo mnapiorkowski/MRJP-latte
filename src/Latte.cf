@@ -22,7 +22,7 @@ Init.           Item ::= Ident "=" Expr ;
 separator       nonempty Item "," ;
 
 LVar.           LVal ::= Ident ;
-LArr.           LVal ::= Ident "[" Expr "]" ;
+LArr.           LVal ::= Expr6 "[" Expr "]" ;
 SAss.           Stmt ::= LVal "=" Expr  ";" ;
 SIncr.          Stmt ::= LVal "++"  ";" ;
 SDecr.          Stmt ::= LVal "--"  ";" ;

@@ -20,8 +20,8 @@ import Backend.Generator.Statements (genBlock)
 indentLine :: String -> String
 indentLine line =
   if null line ||
-     any (`isPrefixOf` line) ["@", "}", "declare", "define"]  ||
-     ":" `isSuffixOf` line
+     any (`isPrefixOf` line) ["@", "declare", "define"]  ||
+     any (`isSuffixOf` line) ["}", ":"]
   then line ++ "\n"
   else "\t" ++ line ++ "\n"
 
@@ -36,6 +36,10 @@ declarations = DList.fromList [
   "declare i32 @readInt()",
   "declare i8* @readString()",
   "declare i8* @concatStrings(i8*, i8*)",
+  "declare i8* @malloc(i32)",
+  "declare i8* @memset(i8*, i32, i32)",
+  "",
+  "%array = type {i8*, i32}",
   ""
   ]
 

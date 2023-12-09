@@ -15,7 +15,7 @@ type Code = DList String
 type HasRet = Bool
 
 data Symbol = NumSym Int | StrSym String
-data VarType = T Type | Ref Type | Arr (Int, Type)
+data VarType = T Type | Ref Type | StringLit Int
 type Var = (VarType, Symbol)
 data Val = VConst Const | VLocal Var | VGlobal Var
 

@@ -10,7 +10,10 @@ import Latte.Abs
 import Common
 import Backend.Types
 import Backend.Utils
-import Backend.Generator.Expressions (genExpr, genELVal)
+import Backend.Generator.Expressions (
+  genExpr, genGetArrayPtr, genGetArrayElem, genGetArrayLength, genLoadVar,
+  genCheckAgainstVal
+  )
 
 genSExp :: Expr -> CM (Code, HasRet)
 genSExp e = do
@@ -19,25 +22,30 @@ genSExp e = do
 
 genInit :: Type -> Ident -> Expr -> CM Code
 genInit t id e = do
-  (eCode, v) <- genExpr e
+  (code, v) <- genExpr e
   sym <- newLocalSym
-  let newVar = ((Ref t), sym)
+  let newVar = (Ref t, sym)
   setLocal id newVar
-  let alloca = DList.singleton $ (genLocSymbol sym) ++ " = alloca " ++ (genType t)
+  let alloca = DList.singleton $ (genLocSymbol sym) ++ " = alloca " ++ 
+              (genType t)
   let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
               ", " ++ (genTypedVal (VLocal newVar))
-  return $ DList.concat [eCode, alloca, store]
+  return $ DList.concat [code, alloca, store]
 
-genNoInit :: Pos -> Type -> Ident -> CM Code
-genNoInit pos t id = case t of
-  IntT -> genInit t id (ELitInt pos 0)
-  BoolT -> genInit t id (ELitFalse pos)
-  StringT -> genInit t id (EString pos "")
-  -- ArrayT -> ...
+genNoInit :: Type -> Ident -> CM Code
+genNoInit t id = do
+  sym <- newLocalSym
+  let newVar = (Ref t, sym)
+  setLocal id newVar
+  let alloca = DList.singleton $ (genLocSymbol sym) ++ " = alloca " ++ 
+              (genType t)
+  let store = DList.singleton $ "store " ++ (genDefaultValue t) ++ 
+              ", " ++ (genTypedVal (VLocal newVar))
+  return $ DList.concat [alloca, store]
 
 genDecl :: Type -> Item -> CM Code
 genDecl t i = case i of
-  NoInit pos id -> genNoInit pos t id
+  NoInit _ id -> genNoInit t id
   Init _ id e -> genInit t id e
 
 genDecls :: Type -> [Item] -> Code -> CM Code
@@ -65,7 +73,20 @@ genSAss lv e = case lv of
       StrSym str -> do
         code <- genInit (convVarType t) id e
         return (code, False)
-  -- LArr _ id e ->
+  LArr _ eArr eIdx -> do
+    (arrCode, v) <- genExpr eArr
+    (code, arr) <- genGetArrayPtr v
+    (lengthCode, vLength) <- genGetArrayLength v
+    (idx, vIdx) <- genExpr eIdx
+    check <- genCheckAgainstVal vIdx "slt" (VConst (CInt 0))
+    check2 <- genCheckAgainstVal vIdx "sge" vLength
+    (elemCode, elemPtr) <- genGetArrayElem arr vIdx
+    (exprCode, v) <- genExpr e
+    let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
+                ", " ++ (genTypedVal elemPtr)
+    return (DList.concat [
+      arrCode, code, lengthCode, idx, check, check2, elemCode, exprCode, store
+      ], False)
 
 genSIncrDecr :: Pos -> LVal -> AddOp -> CM (Code, HasRet)
 genSIncrDecr pos lv op = genSAss lv (EAdd pos (ELVal pos lv) op (ELitInt pos 1))
@@ -162,6 +183,49 @@ genSWhile e s = case tryEval e of
         brCond, label1, cond, brBody, label2, body, brCond, label3
         ], False)
 
+genSFor :: Type -> Ident -> Expr -> Stmt -> CM (Code, HasRet)
+genSFor t id e s = do
+  lBefore <- newLabel
+  let brBefore = DList.singleton $ "br " ++ (genTypedLabel lBefore)
+  let label1 = DList.singleton $ genLabel lBefore
+  (code, v) <- genExpr e
+  (lengthCode, length) <- genGetArrayLength v
+  (arrCode, arr) <- genGetArrayPtr v
+  lLoop <- newLabel
+  let brLoop = DList.singleton $ "br " ++ (genTypedLabel lLoop)
+  let label2 = DList.singleton $ genLabel lLoop
+  counterSym <- newLocalSym
+  incrSym <- newLocalSym
+  let incr = DList.singleton $ (genLocSymbol incrSym) ++ " = add " ++ 
+            (genType IntT) ++ " " ++ (genLocSymbol counterSym) ++ ", 1"
+  (elemCode, elemVal) <- genGetArrayElem arr (VLocal (T IntT, counterSym))
+
+  (locals, _, _) <- get
+  setLocal id (valToVar elemVal)
+  (stmtCode, hasRet) <- genStmt s
+  (_, globals, counters) <- get
+  put (locals, globals, counters)
+
+  lCheck <- newLabel
+  let brCheck = DList.singleton $ "br " ++ (genTypedLabel lCheck)
+  let label3 = DList.singleton $ genLabel lCheck
+  let phi = DList.singleton $ (genLocSymbol counterSym) ++ " = phi " ++ 
+            (genType IntT) ++ " [0, " ++ (genArgLabel lBefore) ++ "], [" ++
+            (genLocSymbol incrSym) ++ ", " ++ (genArgLabel lCheck) ++ "]"
+
+  icmpSym <- newLocalSym
+  let icmp = DList.singleton $ (genLocSymbol icmpSym) ++ " = icmp sgt " ++
+            (genTypedVal length) ++ ", " ++ (genLocSymbol incrSym)
+  lAfter <- newLabel
+  let brCond = DList.singleton $ "br " ++ (genType BoolT) ++ " " ++ 
+              (genLocSymbol icmpSym) ++ ", " ++ (genTypedLabel lLoop) ++
+              ", " ++ (genTypedLabel lAfter)
+  let label4 = DList.singleton $ genLabel lAfter
+  return (DList.concat [
+    brBefore, label1, code, lengthCode, arrCode, brLoop, 
+    label2, phi, incr, elemCode, stmtCode, brCheck, label3, icmp, brCond, label4
+    ], False)
+
 genStmt :: Stmt -> CM (Code, HasRet)
 genStmt s = case s of
   SEmpty _ -> return (DList.empty, False)
@@ -176,8 +240,8 @@ genStmt s = case s of
   SIf _ e s -> genSIf e s
   SIfElse _ e sIf sElse -> genSIfElse e sIf sElse
   SWhile _ e s -> genSWhile e s
-  -- SFor pos tt id e s -> checkSFor pos tt id e s
-  _ -> return (DList.empty, False)
+  SFor _ tt id e s -> genSFor (convType tt) id e s
+  -- _ -> return (DList.empty, False)
 
 genStmts :: [Stmt]-> Code -> CM (Code, HasRet)
 genStmts [] acc = return (acc, False)

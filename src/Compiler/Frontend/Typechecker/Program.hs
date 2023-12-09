@@ -105,6 +105,7 @@ doesReturnOrLoopForever s = case s of
     case tryEval e of
       Just (CBool b) -> b
       Nothing -> False
+  SFor _ _ _ _ s -> doesReturnOrLoopForever s
   _ -> False
 
 doReturnOrLoopForever :: [Stmt] -> Bool
@@ -171,7 +172,9 @@ typecheck p = do
         (Ident "error", (VoidT, [])),
         (Ident "readInt", (IntT, [])),
         (Ident "readString", (StringT, [])),
-        (Ident "concatStrings", (StringT, [StringT, StringT]))
+        (Ident "concatStrings", (StringT, [StringT, StringT])),
+        (Ident "malloc", (PtrT, [IntT])),
+        (Ident "memset", (PtrT, [PtrT, IntT, IntT]))
         ]
   let initContext = (Ident "")
   let initEnv = (initVarEnv, initFuncEnv, Set.empty)

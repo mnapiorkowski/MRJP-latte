@@ -14,23 +14,34 @@ import Backend.Types
 genType :: Type -> String
 genType IntT = "i32"
 genType BoolT = "i1"
-genType CharT = "i8"
 genType StringT = "i8*"
 genType VoidT = "void"
-genType (ArrayT t) = (genType t) ++ "*"
+genType (ArrayT t) = "%array*" -- (genType t) ++ "*"
+genType PtrT = "i8*"
 
 genDefaultValue :: Type -> String
-genDefaultValue IntT = "i32 0"
-genDefaultValue BoolT = "i1 false"
-genDefaultValue CharT = "i8 0"
-genDefaultValue StringT = "i8* null"
-genDefaultValue VoidT = "void"
-genDefaultValue (ArrayT t) = (genType t) ++ "* null"
+genDefaultValue t = (genType t) ++ " " ++ case t of
+  VoidT -> ""
+  IntT -> "0"
+  BoolT -> "false"
+  StringT -> "null"
+  (ArrayT t) -> "null"
+  PtrT -> "null"
 
 genVarType :: VarType -> String
 genVarType (T t) = genType t
 genVarType (Ref t) = (genType t) ++ "*"
-genVarType (Arr (i, t)) = "[" ++ (show i) ++ " x " ++ (genType t) ++ "]"
+genVarType (StringLit i) = "[" ++ (show i) ++ " x i8]"
+
+valType :: Val -> VarType
+valType (VConst (CInt _)) = T IntT
+valType (VConst (CBool _)) = T BoolT
+valType (VLocal (t, _)) = t
+valType (VGlobal (t, _)) = t
+
+valToVar :: Val -> Var
+valToVar (VLocal v) = v
+valToVar (VGlobal v) = v
 
 genValType :: Val -> String
 genValType (VConst (CInt _)) = genType IntT
@@ -71,11 +82,13 @@ genIdent :: Ident -> String
 genIdent (Ident id) = id
 
 dereference :: VarType -> VarType
-dereference (Ref t) = (T t)
+dereference (Ref t) = T t
 
 convVarType :: VarType -> Type
 convVarType (T t) = t
-convVarType (Ref t) = t
+
+arrayElemType :: Type -> Type
+arrayElemType (ArrayT t) = t
 
 newLocalSym :: CM Symbol
 newLocalSym = do
