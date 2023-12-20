@@ -16,7 +16,7 @@ type Pos = BNFC'Position
 
 type FuncEnv = Map Ident (Type, [Type])
 
-data Type = IntT | StringT | BoolT | VoidT | ArrayT Type | PtrT
+data Type = IntT | StringT | BoolT | VoidT | ArrayT Type | PtrT | ClassT Ident
   deriving Eq
 
 data Const = CInt Integer | CBool Bool
@@ -27,6 +27,7 @@ convType (TBool _) = BoolT
 convType (TString _) = StringT
 convType (TVoid _) = VoidT
 convType (TArray _ tt) = ArrayT (convType tt)
+convType (TClass _ id) = ClassT id
 
 typeOfArrayElem :: Type -> Type
 typeOfArrayElem (ArrayT t) = t
@@ -34,6 +35,13 @@ typeOfArrayElem (ArrayT t) = t
 isArrayType :: Type -> Bool
 isArrayType (ArrayT _) = True
 isArrayType _ = False
+
+isClassType :: Type -> Bool
+isClassType (ClassT _) = True
+isClassType _ = False
+
+classIdent :: Type -> Ident
+classIdent (ClassT id) = id
 
 posStr :: Pos -> String
 posStr Nothing = "in unknown position:\n"

@@ -14,13 +14,6 @@ import Frontend.Types
 import Frontend.Utils
 import Frontend.Typechecker.Expressions (typeOfExpr, typeOfLVal, checkUnaryOp)
 
-setVar :: Type -> Ident -> TM Env
-setVar t id = do
-  (varEnv, funcEnv, varsInBlock) <- ask
-  let varEnv' = Map.insert id t varEnv
-  let varsInBlock' = Set.insert id varsInBlock
-  return (varEnv', funcEnv, varsInBlock')
-
 checkSExp :: Expr -> TM Env  
 checkSExp e = do
   typeOfExpr e
@@ -28,10 +21,10 @@ checkSExp e = do
 
 checkNoInit :: Pos -> Type -> Ident -> TM Env
 checkNoInit pos t id = do
-  (_, _, varsInBlock) <- ask
+  varsInBlock <- getVarsInBlock
   if Set.member id varsInBlock
-  then throwE pos $
-    "variable " ++ printTree id ++ " has already been declared"
+    then throwE pos $
+      "variable " ++ printTree id ++ " has already been declared"
   else setVar t id
 
 checkInit :: Pos -> Type -> Ident -> Expr -> TM Env
@@ -57,12 +50,16 @@ checkDecls t (i:is) = do
 checkSDecl :: Pos -> TType -> [Item] -> TM Env
 checkSDecl pos tt is = do
   let t = convType tt
+  isValid <- isValidType t
   if t == VoidT
     then throwE pos $
       "declared void-type variable " ++ printTree is
   else if t == (ArrayT VoidT)
     then throwE pos $
       "declared void-type array " ++ printTree is
+  else if not isValid
+    then throwE pos $
+      "invalid type " ++ showType t ++ " in declaration of " ++ printTree is
   else do
     env <- checkDecls t is
     return env
@@ -86,7 +83,7 @@ checkSRet :: Pos -> Expr -> TM Env
 checkSRet pos e = do
   t <- typeOfExpr e
   funcId <- get
-  env@(_, funcEnv, _) <- ask
+  env@(_, funcEnv, _, _) <- ask
   let (retT, _) = funcEnv Map.! funcId
   if t /= retT
     then throwE pos $
@@ -99,7 +96,7 @@ checkSRet pos e = do
 checkSVRet :: Pos -> TM Env
 checkSVRet pos = do
   funcId <- get
-  env@(_, funcEnv, _) <- ask
+  env@(_, funcEnv, _, _) <- ask
   let (retT, _) = funcEnv Map.! funcId
   if retT /= VoidT
     then throwE pos $
@@ -139,14 +136,18 @@ checkSWhile pos e s = do
 checkSFor :: Pos -> TType -> Ident -> Expr -> Stmt -> TM Env
 checkSFor pos tt id e s = do
   let t = convType tt
+  isValid <- isValidType t
   exprT <- typeOfExpr e
-  if exprT /= (ArrayT t)
+  if not isValid
+    then throwE pos $
+      "invalid type " ++ showType t ++ " of a variable in for loop"
+  else if exprT /= (ArrayT t)
     then throwE pos $
       "wrong type of expression in for loop: " ++ printTree e ++
       "\nexpected type: " ++ showType (ArrayT t)
   else do
-    (varEnv, funcEnv, _) <- setVar t id
-    let blockEnv = (varEnv, funcEnv, Set.singleton id)
+    (varEnv, funcEnv, classEnv, _) <- setVar t id
+    let blockEnv = (varEnv, funcEnv, classEnv, Set.singleton id)
     case s of
       SBlock _ (BBlock _ ss) -> local (const blockEnv) $ checkStmts ss
       _ -> local (const blockEnv) $ checkStmt s
@@ -176,6 +177,6 @@ checkStmts (s:ss) = do
 
 checkBlock :: Block -> TM Env
 checkBlock (BBlock _ ss) = do
-  env@(varEnv, funcEnv, _) <- ask
-  local (const (varEnv, funcEnv, Set.empty)) $ checkStmts ss
+  env@(varEnv, funcEnv, classEnv, _) <- ask
+  local (const (varEnv, funcEnv, classEnv, Set.empty)) $ checkStmts ss
   return env

@@ -57,7 +57,7 @@ typeOfRelOp pos e1 op e2 = case op of
 
 typeOfVar :: Pos -> Ident -> TM Type
 typeOfVar pos id = do
-  (varEnv, _, _) <- ask
+  varEnv <- getVarEnv
   if Map.notMember id varEnv
     then throwE pos $
       "variable " ++ printTree id ++ " is not declared"
@@ -76,6 +76,24 @@ typeOfLVal pos lv = case lv of
       then throwE pos $
         "array index is not int-type: " ++ printTree eAt
     else return $ typeOfArrayElem arrT
+  LAttr pos e id -> do
+    t <- typeOfExpr e
+    if (isArrayType t) && (id == Ident "length")
+      then return IntT
+    else if not (isClassType t)
+      then throwE pos $ "type " ++ showType t ++ 
+        " does not have the attribute " ++ printTree id
+    else do
+      classEnv <- getClassEnv
+      let attributes = classEnv Map.! (classIdent t)
+      if Map.notMember id attributes
+        then throwE pos $ "class " ++ showType t ++ 
+          " does not have the attribute " ++ printTree id
+      else return (attributes Map.! id)
+
+-- typeOfSelf :: Pos -> TM Type
+-- typeOfSelf pos = do
+-- TODO: check if self is inside of a class
 
 checkArg :: Pos -> Ident -> Type -> Expr -> TM ()
 checkArg pos id t e = do
@@ -96,9 +114,9 @@ checkArgs pos id (t:ts) (e:es) = do
   checkArg pos id t e
   checkArgs pos id ts es
 
-typeOfApp :: Pos -> Ident -> [Expr] -> TM Type
-typeOfApp pos id es = do
-  (_, funcEnv, _) <- ask
+typeOfCall :: Pos -> Ident -> [Expr] -> TM Type
+typeOfCall pos id es = do
+  funcEnv <- getFuncEnv
   if id == Ident "main"
     then throwE pos "cannot call main function"
   else if Map.notMember id funcEnv
@@ -109,6 +127,18 @@ typeOfApp pos id es = do
     checkArgs pos id paramTs es
     return retT
 
+-- typeOfMetCall :: Pos -> Expr -> Ident -> [Expr] -> TM Type
+-- typeOfMetCall pos e id es = do
+
+typeOfNewObj :: Pos -> TType -> TM Type
+typeOfNewObj pos tt = do
+  let t = convType tt
+  isValid <- isValidType t
+  if (not (isClassType t)) || (not isValid)
+    then throwE pos $
+      "cannot construct object of type " ++ showType t
+  else return t
+
 typeOfNewArr :: Pos -> TType -> Expr -> TM Type
 typeOfNewArr pos tt e = do
   sizeT <- typeOfExpr e
@@ -116,21 +146,21 @@ typeOfNewArr pos tt e = do
     then throwE pos "size of an array must be int-type"
   else do
     let t = convType tt
+    isValid <- isValidType t
     if t == VoidT
       then throwE pos "cannot construct a void-type array"
+    else if not isValid
+      then throwE pos $ "cannot construct an array of type " ++ showType t
     else return (ArrayT t)
 
-typeOfAttr :: Pos -> Expr -> Ident -> TM Type
-typeOfAttr pos e id = do
-  t <- typeOfExpr e
-  if id /= Ident "length"
-    then throwE pos $
-      "unknown attribute: " ++ printTree id
-  else if not (isArrayType t)
-    then throwE pos $
-      "tried to get length attribute from non-array expression " ++ 
-      printTree e
-  else return IntT
+typeOfCast :: Pos -> TType -> Expr -> TM Type
+typeOfCast pos tt e = do
+  let t = convType tt
+  isValid <- isValidType t
+  valT <- typeOfExpr e
+  if (isClassType t) && isValid && (valT == PtrT)
+    then return t
+  else throwE pos $ "cannot cast " ++ printTree e ++ " to " ++ showType t
 
 typeOfExpr :: Expr -> TM Type
 typeOfExpr e = case e of
@@ -138,10 +168,14 @@ typeOfExpr e = case e of
   ELitTrue _ -> return BoolT
   ELitFalse _ -> return BoolT
   EString _ _ -> return StringT
+  ENull _ -> return PtrT
   ELVal pos lv -> typeOfLVal pos lv
-  EApp pos id es -> typeOfApp pos id es
+  -- ESelf pos -> typeOfSelf pos
+  ECall pos id es -> typeOfCall pos id es
+  -- EMetCall pos e id es -> typeOfMetCall pos e id es
+  ENewObj pos tt -> typeOfNewObj pos tt
   ENewArr pos tt e -> typeOfNewArr pos tt e
-  EAttr pos e id -> typeOfAttr pos e id
+  ECast pos tt e -> typeOfCast pos tt e
   ENeg pos e -> checkUnaryOp pos IntT e >> return IntT
   ENot pos e -> checkUnaryOp pos BoolT e >> return BoolT
   EMul pos e1 op e2 -> typeOfMulOp pos e1 op e2

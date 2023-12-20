@@ -15,10 +15,45 @@ import Latte.Print (printTree)
 import Common
 import Frontend.Types
 import Frontend.Utils
-import Frontend.Typechecker.Statements (setVar, checkBlock)
+import Frontend.Typechecker.Statements (checkBlock)
+
+setFuncId :: Pos -> Ident -> TM Env
+setFuncId pos id = do
+  funcEnv <- getFuncEnv
+  if Map.member id funcEnv
+    then throwE pos $
+      "function " ++ printTree id ++ " is already defined"
+  else setFunc PtrT id []
+
+setClassId :: Pos -> Ident -> TM Env
+setClassId pos id = do
+  classEnv <- getClassEnv
+  if Map.member id classEnv
+    then throwE pos $
+      "class " ++ printTree id ++ " is already defined"
+  else setClass id Map.empty
+
+setTopDef :: TopDef -> TM Env
+setTopDef d = case d of
+  FnDef pos _ id _ _ -> setFuncId pos id
+  ClassDef pos id _ -> setClassId pos id
+
+setTopDefs :: [TopDef] -> TM Env
+setTopDefs [] = ask
+setTopDefs (d:ds) = do
+  env <- setTopDef d
+  local (const env) $ setTopDefs ds
 
 typeOfParam :: Arg -> TM Type
-typeOfParam (AArg _ tt _) = return $ convType tt
+typeOfParam (AArg pos tt id) = do
+  let t = convType tt
+  isValid <- isValidType t
+  if not isValid
+    then throwE pos $ "invalid type " ++ showType t ++ " of function parameter"
+  else if t == VoidT
+    then throwE pos $
+      "function parameter " ++ printTree id ++ " cannot be void-type"
+  else return t
 
 typeOfParams :: [Arg] -> TM [Type]
 typeOfParams [] = return []
@@ -27,46 +62,60 @@ typeOfParams (p:ps) = do
   ts <- typeOfParams ps
   return (t:ts)
 
-setFunc :: Type -> Ident -> [Type] -> TM Env
-setFunc t id paramTs = do
-  (varEnv, funcEnv, varsInBlock) <- ask
-  let funcEnv' = Map.insert id (t, paramTs) funcEnv
-  return (varEnv, funcEnv', varsInBlock) 
-
-setFnDef :: Pos -> TType -> Ident -> [Arg] -> TM Env
-setFnDef pos tt id as = do
+checkFuncSignature :: Pos -> TType -> Ident -> [Arg] -> TM Env
+checkFuncSignature pos tt id ps = do
   let t = convType tt
-  (_, funcEnv, _) <- ask
-  if Map.member id funcEnv
-    then throwE pos $
-      "function " ++ printTree id ++ " is already defined"
+  isValid <- isValidType t
+  if not isValid
+    then throwE pos $ "function returns invalid type " ++ showType t
   else do
-    paramTs <- typeOfParams as
+    paramTs <- typeOfParams ps
     setFunc t id paramTs
 
-setTopDef :: TopDef -> TM Env
-setTopDef d = case d of
-  FnDef pos tt id as _ -> setFnDef pos tt id as
+checkMembers' :: [CMember] -> VarEnv -> TM VarEnv
+checkMembers' [] attributes = return attributes
+checkMembers' (m:ms) attributes = case m of
+  CAttr pos tt id -> do
+    if Map.member id attributes
+      then throwE pos $
+        "class member " ++ printTree id ++ " is already declared in this class"
+    else do
+      let t = convType tt
+      isValid <- isValidType t
+      if isValid
+        then checkMembers' ms (Map.insert id t attributes)
+      else throwE pos $
+        "invalid type " ++ showType t ++ " of class attribute"
+  CMethod pos tt id as b -> checkMembers' ms attributes -- TODO: check methods signatures
 
-setTopDefs :: [TopDef] -> TM Env
-setTopDefs [] = ask
-setTopDefs (d:ds) = do
-  env <- setTopDef d
-  local (const env) $ setTopDefs ds
+checkMembers :: ClassBlock -> TM VarEnv
+checkMembers (CBlock _ ms) = checkMembers' ms Map.empty
+
+checkClassMembers :: Ident -> ClassBlock -> TM Env
+checkClassMembers id cb = do
+  attributes <- checkMembers cb
+  setClass id attributes
+
+checkTopDef1 :: TopDef -> TM Env
+checkTopDef1 d = case d of
+  FnDef pos tt id as _ -> checkFuncSignature pos tt id as
+  ClassDef _ id cb -> checkClassMembers id cb
+
+checkTopDefs1 :: [TopDef] -> TM Env
+checkTopDefs1 [] = ask
+checkTopDefs1 (d:ds) = do
+  env <- checkTopDef1 d
+  local (const env) $ checkTopDefs1 ds
 
 checkParam :: Arg -> TM Env
 checkParam (AArg pos tt id) = do
   let t = convType tt
-  if t == VoidT
+  varEnv <- getVarEnv
+  if Map.member id varEnv
     then throwE pos $
-      "function parameter " ++ printTree id ++ " is void-type"
-  else do
-    (varEnv, _, _) <- ask
-    if Map.member id varEnv
-      then throwE pos $
-        "function parameters have the same identifiers " ++ 
-        printTree id
-    else setVar t id
+      "function parameters have the same identifiers " ++ 
+      printTree id
+  else setVar t id
 
 checkParams :: [Arg] -> TM Env
 checkParams [] = ask
@@ -74,19 +123,11 @@ checkParams (p:ps) = do
   env <- checkParam p
   local (const env) $ checkParams ps
 
-mergeEnv :: Env -> TM Env
-mergeEnv (varEnv, funcEnv, varsInBlock) = do
-    (oldVarEnv, oldFuncEnv, oldVarsInBlock) <- ask
-    let newVarEnv = Map.union oldVarEnv varEnv
-    let newFuncEnv = Map.union oldFuncEnv funcEnv
-    let newVarsInBlock = Set.union oldVarsInBlock varsInBlock
-    return (newVarEnv, newFuncEnv, newVarsInBlock)
-
 doesReturnOrLoopForever :: Stmt -> Bool
 doesReturnOrLoopForever s = case s of
   SRet _ _ -> True
   SBlock _ (BBlock _ ss) -> doReturnOrLoopForever ss
-  SExp _ (EApp _ (Ident "error") []) -> True
+  SExp _ (ECall _ (Ident "error") []) -> True
   SIf _ e s -> do
     case tryEval e of
       Just (CBool b) -> do
@@ -122,33 +163,37 @@ analyseFlow (BBlock pos ss) id = do
   else throwE pos $
     "function " ++ printTree id ++ " does not always return a value"
 
-checkFnDef :: Pos -> Ident -> [Arg] -> Block -> TM ()
-checkFnDef pos id ps b = do
-  env@(_, funcEnv, _) <- ask
-  let (t, paramTs) = funcEnv Map.! id
+checkFuncBody :: Ident -> [Arg] -> Block -> TM ()
+checkFuncBody id ps b = do
+  env@(_, funcEnv, classEnv, _) <- ask
   put (id)
-  env1 <- local (const (Map.empty, Map.empty, Set.empty)) $ checkParams ps
-  env2 <- local (const env1) $ setFunc t id paramTs -- recursion
-  env3 <- local (const env) $ mergeEnv env2
-  local (const env3) $ checkBlock b
+  env' <- local (const (Map.empty, funcEnv, classEnv, Set.empty)) $ 
+          checkParams ps
+  local (const env') $ checkBlock b
+  let (t, paramTs) = funcEnv Map.! id
   if t /= VoidT
     then analyseFlow b id
   else return ()
 
-checkTopDef :: TopDef -> TM ()
-checkTopDef d = case d of
-  FnDef pos tt id as b -> checkFnDef pos id as b
+checkMethods:: Pos -> Ident -> ClassBlock -> TM ()
+checkMethods pos id cb = return () -- TODO
 
-checkTopDefs :: [TopDef] -> TM ()
-checkTopDefs [] = return ()
-checkTopDefs (d:ds) = do
-  checkTopDef d
-  checkTopDefs ds
+checkTopDef2 :: TopDef -> TM ()
+checkTopDef2 d = case d of
+  FnDef _ _ id as b -> checkFuncBody id as b
+  ClassDef pos id cb -> checkMethods pos id cb
+
+checkTopDefs2 :: [TopDef] -> TM ()
+checkTopDefs2 [] = return ()
+checkTopDefs2 (d:ds) = do
+  checkTopDef2 d
+  checkTopDefs2 ds
 
 checkProgr :: Program -> TM FuncEnv
 checkProgr (Progr pos ds) = do
-  env@(_, funcEnv, _) <- setTopDefs ds
-  local (const env) $ checkTopDefs ds
+  env <- setTopDefs ds
+  env'@(_, funcEnv, _, _) <- local (const env) $ checkTopDefs1 ds
+  local (const env') $ checkTopDefs2 ds
   let main = Ident "main"
   if Map.notMember main funcEnv
     then throwE pos $
@@ -176,9 +221,13 @@ typecheck p = do
         (Ident "malloc", (PtrT, [IntT])),
         (Ident "memset", (PtrT, [PtrT, IntT, IntT]))
         ]
+  let initClassEnv = Map.empty
   let initContext = (Ident "")
-  let initEnv = (initVarEnv, initFuncEnv, Set.empty)
-  let res = runExcept $ runReaderT (evalStateT (checkProgr p) initContext) initEnv
+  let initEnv = (initVarEnv, initFuncEnv, initClassEnv, Set.empty)
+  let res = runExcept $ 
+              runReaderT (
+                evalStateT (checkProgr p) initContext
+              ) initEnv
   case res of
     Left err -> printError ("semantic error " ++ err)
     Right env -> return env

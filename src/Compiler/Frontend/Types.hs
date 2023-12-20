@@ -15,8 +15,9 @@ import Latte.Abs (Ident, Expr)
 import Common
 
 type VarEnv = Map Ident Type
+type ClassEnv = Map Ident VarEnv -- for objects (VarEnv, FuncEnv)
 type VarsInBlock = Set Ident
-type Env = (VarEnv, FuncEnv, VarsInBlock)
+type Env = (VarEnv, FuncEnv, ClassEnv, VarsInBlock)
 
 type CurrentFunc = Ident
 type Context = (CurrentFunc)

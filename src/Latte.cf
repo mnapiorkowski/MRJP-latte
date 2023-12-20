@@ -3,14 +3,22 @@
 entrypoints     Program ;
 Progr.          Program ::= [TopDef] ;
 FnDef.	        TopDef ::= TType Ident "(" [Arg] ")" Block ;
+ClassDef.       TopDef ::= "class" Ident ClassBlock ;
+SubclassDef.    TopDef ::= "class" Ident "extends" Ident ClassBlock ;
 separator       nonempty TopDef "" ;
 
 AArg.           Arg ::= TType Ident ;
 separator       Arg "," ;
 
+BBlock.         Block ::= "{" [Stmt] "}" ;
+CBlock.         ClassBlock ::= "{" [CMember] "}" ;
+
+separator       CMember "" ;
+CAttr.          CMember ::= TType Ident ";" ;
+CMethod.        CMember ::= TType Ident "(" [Arg] ")" Block ; 
+
 -- statements ----------------------------------------------
 
-BBlock.         Block ::= "{" [Stmt] "}" ;
 separator       Stmt "" ;
 SEmpty.         Stmt ::= ";" ;
 SBlock.         Stmt ::= Block ;
@@ -22,7 +30,9 @@ Init.           Item ::= Ident "=" Expr ;
 separator       nonempty Item "," ;
 
 LVar.           LVal ::= Ident ;
-LArr.           LVal ::= Expr6 "[" Expr "]" ;
+LArr.           LVal ::= Expr7 "[" Expr "]" ;
+LAttr.          LVal ::= Expr7 "." Ident ;
+
 SAss.           Stmt ::= LVal "=" Expr  ";" ;
 SIncr.          Stmt ::= LVal "++"  ";" ;
 SDecr.          Stmt ::= LVal "--"  ";" ;
@@ -43,19 +53,25 @@ TBool.          TType ::= "boolean" ;
 TString.        TType ::= "string" ;
 TVoid.          TType ::= "void" ;
 TArray.         TType ::= TType "[]" ;
+TClass.         TType ::= Ident ;
 
 -- Expressions ---------------------------------------------
 
-ELitInt.        Expr7 ::= Integer ;
-ELitTrue.       Expr7 ::= "true" ;
-ELitFalse.      Expr7 ::= "false" ;
-EString.        Expr7 ::= String ;
+ELitInt.        Expr8 ::= Integer ;
+ELitTrue.       Expr8 ::= "true" ;
+ELitFalse.      Expr8 ::= "false" ;
+EString.        Expr8 ::= String ;
+ENull.          Expr8 ::= "null" ;
 
-ELVal.          Expr6 ::= LVal ;
-EApp.           Expr6 ::= Ident "(" [Expr] ")" ;
+ELVal.          Expr7 ::= LVal ;
+ESelf.          Expr7 ::= "self" ;
+ECall.          Expr7 ::= Ident "(" [Expr] ")" ;
+EMetCall.       Expr7 ::= Expr7 "." Ident "(" [Expr] ")" ;
+
+ENewObj.        Expr6 ::= "new" TType ;
 ENewArr.        Expr6 ::= "new" TType "[" Expr "]" ;
 
-EAttr.          Expr5 ::= Expr6 "." Ident ;
+ECast.          Expr5 ::= "(" TType ")" Expr6 ;
 ENeg.           Expr5 ::= "-" Expr6 ;
 ENot.           Expr5 ::= "!" Expr6 ;
 
@@ -69,7 +85,7 @@ EAnd.           Expr1 ::= Expr2 "&&" Expr1 ;
 
 EOr.            Expr ::= Expr1 "||" Expr ;
 
-coercions       Expr 7 ;
+coercions       Expr 8 ;
 separator       Expr "," ;
 
 -- operators -----------------------------------------------

@@ -97,9 +97,18 @@ genELVal lv = case lv of
     return (DList.concat [
       arrCode, code, lengthCode, idx, check, check2, elemCode, loadElem
       ], elemVal)
+  LAttr _ e id -> do
+    (code, v) <- genExpr e
+    let t = convVarType $ valType v
+    if (isArrayType t) && (id == Ident "length")
+      then do
+        (lengthCode, vLength) <- genGetArrayLength v
+        return (DList.concat [code, lengthCode], vLength)
+    else do -- TODO
+      return (DList.concat [code], v)
 
-genEApp :: Ident -> [Expr] -> CM (Code, Val)
-genEApp id es = do
+genECall :: Ident -> [Expr] -> CM (Code, Val)
+genECall id es = do
   (code, vals) <- genExprs es (DList.empty, [])
   funcEnv <- ask
   let (t, _) = funcEnv Map.! id
@@ -228,7 +237,7 @@ genAddOp e1 op e2 = case op of
   OPlus _ -> do
     (_, v) <- genExpr e1
     case v of
-      VLocal (T StringT, _) -> genEApp (Ident "concatStrings") [e1, e2]
+      VLocal (T StringT, _) -> genECall (Ident "concatStrings") [e1, e2]
       _ -> genBinaryOp IntT e1 e2 "add"
 
 genMulOp :: Expr -> MulOp -> Expr -> CM (Code, Val)
@@ -302,9 +311,8 @@ genExpr e = case e of
   ELitFalse _ -> return (DList.empty, VConst (CBool False))
   EString _ s -> genEString s
   ELVal _ lv -> genELVal lv
-  EApp _ id es -> genEApp id es
+  ECall _ id es -> genECall id es
   ENewArr _ tt e -> genENewArr (convType tt) e
-  EAttr _ e _ -> genArrLength e
   ENeg pos e -> genAddOp (ELitInt pos 0) (OMinus pos) e
   ENot pos e -> genRelOp (ELitFalse pos) (OEq pos) e
   EMul _ e1 op e2 -> genMulOp e1 op e2
