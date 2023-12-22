@@ -89,7 +89,9 @@ typeOfLVal pos lv = case lv of
       if Map.notMember id attributes
         then throwE pos $ "class " ++ showType t ++ 
           " does not have the attribute " ++ printTree id
-      else return (attributes Map.! id)
+      else do
+        let (_, retT) = attributes Map.! id
+        return retT
 
 -- typeOfSelf :: Pos -> TM Type
 -- typeOfSelf pos = do
@@ -156,11 +158,23 @@ typeOfNewArr pos tt e = do
 typeOfCast :: Pos -> TType -> Expr -> TM Type
 typeOfCast pos tt e = do
   let t = convType tt
-  isValid <- isValidType t
   valT <- typeOfExpr e
-  if (isClassType t) && isValid && (valT == PtrT)
+  if (isArrayType t) && (valT == PtrT)
     then return t
   else throwE pos $ "cannot cast " ++ printTree e ++ " to " ++ showType t
+
+typeOfCastClass :: Pos -> Expr -> Expr -> TM Type
+typeOfCastClass pos eClass e = case eClass of
+  ELVal _ (LVar _ id) -> do
+    let t = ClassT id
+    isValid <- isValidType t
+    valT <- typeOfExpr e
+    if not isValid 
+      then throwE pos $ "invalid type: " ++ showType t
+    else if valT /= PtrT
+      then throwE pos $ "cannot cast " ++ printTree e ++ " to " ++ showType t
+    else return t
+  _ -> throwE pos $ "invalid cast of " ++ printTree e
 
 typeOfExpr :: Expr -> TM Type
 typeOfExpr e = case e of
@@ -176,6 +190,7 @@ typeOfExpr e = case e of
   ENewObj pos tt -> typeOfNewObj pos tt
   ENewArr pos tt e -> typeOfNewArr pos tt e
   ECast pos tt e -> typeOfCast pos tt e
+  ECastClass pos eClass e -> typeOfCastClass pos eClass e
   ENeg pos e -> checkUnaryOp pos IntT e >> return IntT
   ENot pos e -> checkUnaryOp pos BoolT e >> return BoolT
   EMul pos e1 op e2 -> typeOfMulOp pos e1 op e2

@@ -7,6 +7,7 @@ import qualified Control.Monad.Except as E ( throwError )
 import qualified Data.Map as Map
 
 import Latte.Abs
+import Latte.Print (printTree)
 
 import Common
 import Backend.Types
@@ -16,17 +17,25 @@ genType IntT = "i32"
 genType BoolT = "i1"
 genType StringT = "i8*"
 genType VoidT = "void"
-genType (ArrayT t) = "%array*" -- (genType t) ++ "*"
+genType (ArrayT t) = genArrayType ++ "*"
+genType (ClassT id) = genClassType id ++ "*"
 genType PtrT = "i8*"
 
-genDefaultValue :: Type -> String
-genDefaultValue t = (genType t) ++ " " ++ case t of
+genClassType :: Ident -> String
+genClassType id = "%" ++ printTree id
+
+genArrayType :: String
+genArrayType = genClassType (Ident "array")
+
+genDefaultVal :: Type -> String
+genDefaultVal t = case t of
   VoidT -> ""
-  IntT -> "0"
-  BoolT -> "false"
-  StringT -> "null"
-  (ArrayT t) -> "null"
-  PtrT -> "null"
+  IntT -> genVal (VConst (CInt 0))
+  BoolT -> genVal (VConst (CBool False))
+  _ -> genVal (VConst CNull)
+
+genTypedDefaultVal :: Type -> String
+genTypedDefaultVal t = (genType t) ++ " " ++ genDefaultVal t
 
 genVarType :: VarType -> String
 genVarType (T t) = genType t
@@ -36,6 +45,7 @@ genVarType (StringLit i) = "[" ++ (show i) ++ " x i8]"
 valType :: Val -> VarType
 valType (VConst (CInt _)) = T IntT
 valType (VConst (CBool _)) = T BoolT
+valType (VConst CNull) = T PtrT
 valType (VLocal (t, _)) = t
 valType (VGlobal (t, _)) = t
 
@@ -46,6 +56,7 @@ valToVar (VGlobal v) = v
 genValType :: Val -> String
 genValType (VConst (CInt _)) = genType IntT
 genValType (VConst (CBool _)) = genType BoolT
+genValType (VConst CNull) = genType PtrT
 genValType (VLocal (t, _)) = genVarType t
 genValType (VGlobal (t, _)) = genVarType t
 
@@ -72,6 +83,7 @@ genVal :: Val -> String
 genVal (VConst (CInt i)) = show i
 genVal (VConst (CBool False)) = "false"
 genVal (VConst (CBool True)) = "true"
+genVal (VConst CNull) = "null"
 genVal (VLocal (_, sym)) = genLocSymbol sym
 genVal (VGlobal (_, sym)) = genGlobSymbol sym
 

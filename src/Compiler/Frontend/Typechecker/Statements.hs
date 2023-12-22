@@ -25,7 +25,7 @@ checkNoInit pos t id = do
   if Set.member id varsInBlock
     then throwE pos $
       "variable " ++ printTree id ++ " has already been declared"
-  else setVar t id
+  else setVar id t
 
 checkInit :: Pos -> Type -> Ident -> Expr -> TM Env
 checkInit pos t id e = do
@@ -65,10 +65,19 @@ checkSDecl pos tt is = do
     return env
 
 checkSAss :: Pos -> LVal -> Expr -> TM Env
-checkSAss pos lv e = do
-  varT <- typeOfLVal pos lv
-  checkUnaryOp pos varT e
-  ask
+checkSAss pos lv e = case lv of
+  LAttr _ e' id -> do
+    t <- typeOfExpr e'
+    if (isArrayType t) && (id == Ident "length")
+      then throwE pos $ "cannot assign a value to array's attribute 'length'"
+    else do
+      varT <- typeOfLVal pos lv
+      checkUnaryOp pos varT e
+      ask
+  _ -> do
+    varT <- typeOfLVal pos lv
+    checkUnaryOp pos varT e
+    ask
 
 checkSIncrDecr :: Pos -> LVal -> TM Env
 checkSIncrDecr pos lv = do
@@ -146,7 +155,7 @@ checkSFor pos tt id e s = do
       "wrong type of expression in for loop: " ++ printTree e ++
       "\nexpected type: " ++ showType (ArrayT t)
   else do
-    (varEnv, funcEnv, classEnv, _) <- setVar t id
+    (varEnv, funcEnv, classEnv, _) <- setVar id t
     let blockEnv = (varEnv, funcEnv, classEnv, Set.singleton id)
     case s of
       SBlock _ (BBlock _ ss) -> local (const blockEnv) $ checkStmts ss

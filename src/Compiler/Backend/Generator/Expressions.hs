@@ -32,7 +32,8 @@ genGetArrayLength arr = do
   ptrSym <- newLocalSym
   let ptr = VLocal (Ref IntT, ptrSym)
   let gep = DList.singleton $ (genLocSymbol ptrSym) ++ " = getelementptr " ++ 
-            "%array, " ++ (genTypedVal arr) ++ ", i32 0, i32 1"
+            genArrayType ++ ", " ++ (genTypedVal arr) ++ ", " ++ 
+            (genType IntT) ++ " 0, " ++ (genType IntT) ++ " 1"
   lengthSym <- newLocalSym
   let length = VLocal (T IntT, lengthSym)
   let loadArr = DList.singleton $ (genLocSymbol lengthSym) ++ 
@@ -44,7 +45,8 @@ genGetArrayPtr arr = do
   let elemT = arrayElemType $ convVarType $ valType arr
   ptrSym <- newLocalSym
   let gep = DList.singleton $ (genLocSymbol ptrSym) ++ " = getelementptr " ++ 
-            "%array, " ++ (genTypedVal arr) ++ ", i32 0, i32 0"
+            genArrayType ++ ", " ++ (genTypedVal arr) ++ ", " ++ 
+            (genType IntT) ++ " 0, " ++ (genType IntT) ++ " 0"
   arrSym <- newLocalSym
   let loadArr = DList.singleton $ (genLocSymbol arrSym) ++ 
                 " = load " ++ (genType PtrT) ++ ", " ++ 
@@ -68,15 +70,12 @@ genGetArrayElem arr idx = do
 
 genLoadVar :: Ident -> CM (Code, Val)
 genLoadVar id = do
-  var@(t, sym) <- getLocal id
-  case sym of
-    NumSym _ -> do
-      let t' = dereference t
-      sym' <- newLocalSym
-      let load = DList.singleton $ (genLocSymbol sym') ++ " = load " ++ 
-                (genVarType t') ++ ", " ++ genTypedVal (VLocal var)
-      return (load, (VLocal (t', sym')))
-    StrSym _ -> return (DList.empty, (VLocal var))
+  var@(t, _) <- getLocal id
+  let t' = dereference t
+  sym' <- newLocalSym
+  let load = DList.singleton $ (genLocSymbol sym') ++ " = load " ++ 
+            (genVarType t') ++ ", " ++ genTypedVal (VLocal var)
+  return (load, (VLocal (t', sym')))
 
 genELVal :: LVal -> CM (Code, Val)
 genELVal lv = case lv of
@@ -104,20 +103,63 @@ genELVal lv = case lv of
       then do
         (lengthCode, vLength) <- genGetArrayLength v
         return (DList.concat [code, lengthCode], vLength)
-    else do -- TODO
-      return (DList.concat [code], v)
+    else do
+      (_, classEnv) <- ask
+      let attributes = classEnv Map.! (classIdent t)
+      let (num, attrT) = attributes Map.! id
+      ptrSym <- newLocalSym
+      let ptr = VLocal (Ref attrT, ptrSym)
+      let gep = DList.singleton $ (genLocSymbol ptrSym) ++ 
+                " = getelementptr " ++ (genClassType (classIdent t)) ++ ", " ++ 
+                (genTypedVal v) ++ ", " ++ (genType IntT) ++ 
+                " 0, " ++ (genType IntT) ++ " " ++ show num
+      attrSym <- newLocalSym
+      let attr = VLocal (T attrT, attrSym)
+      let load = DList.singleton $ (genLocSymbol attrSym) ++ 
+                " = load " ++ (genType attrT) ++ ", " ++ (genTypedVal ptr)
+      return (DList.concat [code, gep, load], attr)
 
 genECall :: Ident -> [Expr] -> CM (Code, Val)
 genECall id es = do
   (code, vals) <- genExprs es (DList.empty, [])
-  funcEnv <- ask
+  (funcEnv, _) <- ask
   let (t, _) = funcEnv Map.! id
   sym <- newLocalSym
   let assStr  | t == VoidT = ""
               | otherwise = (genLocSymbol sym) ++ " = "
   let call = DList.singleton $ assStr ++ "call " ++ (genType t) ++ 
               " @" ++ (genIdent id) ++ "(" ++ (genArgs vals) ++ ")"
-  return (DList.concat [code, call], (VLocal (T t, sym)))
+  return (DList.concat [code, call], (VLocal (T t, sym))) 
+
+genAttrInit :: Val -> (Int, Type) -> CM Code
+genAttrInit v (num, t) = do
+  let classT = genClassType $ classIdent $ convVarType $ valType v
+  ptrSym <- newLocalSym
+  let gep = DList.singleton $ (genLocSymbol ptrSym) ++ 
+            " = getelementptr " ++ classT ++ ", " ++ 
+            (genTypedVal v) ++ ", " ++ (genType IntT) ++ 
+            " 0, " ++ (genType IntT) ++ " " ++ show num
+  let store = DList.singleton $ "store " ++ 
+              (genTypedDefaultVal t) ++ ", " ++ 
+              (genVarType (Ref t)) ++ " " ++ (genLocSymbol ptrSym)
+  return $ DList.concat [gep, store]
+
+genAttrInits :: Val -> [(Int, Type)] -> Code -> CM Code
+genAttrInits _ [] acc = return acc
+genAttrInits v (a:as) acc = do
+  code <- genAttrInit v a
+  genAttrInits v as (DList.append acc code)
+
+genENewObj :: Type -> CM (Code, Val)
+genENewObj t@(ClassT id) = do
+  allocaSym <- newLocalSym
+  let allocaVal = VLocal (T t, allocaSym)
+  let alloca = DList.singleton $ (genLocSymbol allocaSym) ++ " = alloca " ++ 
+                genClassType id
+  (_, classEnv) <- ask
+  let attributes = Map.elems $ classEnv Map.! id
+  inits <- genAttrInits allocaVal attributes DList.empty
+  return (DList.concat [alloca, inits], allocaVal)
 
 genENewArr :: Type -> Expr -> CM (Code, Val)
 genENewArr t e = do
@@ -134,7 +176,8 @@ genENewArr t e = do
   sizeOfTypeSym <- newLocalSym
   let sizeOfType = DList.singleton $ (genLocSymbol sizeOfTypeSym) ++ 
                   " = getelementptr " ++ (genType t) ++ ", " ++ 
-                  (genVarType (Ref t)) ++ " null, i32 1"
+                  (genVarType (Ref t)) ++ " " ++ genVal (VConst CNull) ++ 
+                  ", " ++ (genType IntT) ++ " 1"
   sizeOfTypeSym' <- newLocalSym
   let sizeOfType' = DList.singleton $ (genLocSymbol sizeOfTypeSym') ++ 
                     " = ptrtoint " ++ (genVarType (Ref t)) ++ " " ++ 
@@ -144,15 +187,17 @@ genENewArr t e = do
             (genTypedVal v) ++ ", " ++ (genLocSymbol sizeOfTypeSym')
   let mulVal = VLocal (T IntT, mulSym)
   let memset = DList.singleton $ "call " ++ (genType PtrT) ++" @memset(" ++ 
-              (genTypedVal bitcastVal) ++ ", " ++ (genDefaultValue IntT) ++
-              ", " ++ (genTypedVal mulVal) ++ ")"
+              (genTypedVal bitcastVal) ++ ", " ++ (genType IntT) ++ " 0, " ++
+              (genTypedVal mulVal) ++ ")"
   sizeOfArrSym <- newLocalSym
   let sizeOfArr = DList.singleton $ (genLocSymbol sizeOfArrSym) ++ 
-                  " = getelementptr %array, %array* null, i32 1"
+                  " = getelementptr " ++ genArrayType ++ ", " ++ 
+                  (genType (ArrayT t)) ++ " " ++ genVal (VConst CNull) ++ 
+                  ", " ++ (genType IntT) ++ " 1"
   sizeOfArrSym' <- newLocalSym
   let sizeOfArr' = DList.singleton $ (genLocSymbol sizeOfArrSym') ++ 
-                  " = ptrtoint %array* " ++ (genLocSymbol sizeOfArrSym) ++ 
-                  " to " ++ (genType IntT)
+                  " = ptrtoint " ++ (genType (ArrayT t)) ++ " " ++ 
+                  (genLocSymbol sizeOfArrSym) ++ " to " ++ (genType IntT)
   let arrSize = VLocal (T IntT, sizeOfArrSym')
   arrMallocSym <- newLocalSym
   let arrMalloc = DList.singleton $ (genLocSymbol arrMallocSym) ++ 
@@ -161,21 +206,24 @@ genENewArr t e = do
   arrBitcastSym <- newLocalSym
   let arrBitcast = DList.singleton $ (genLocSymbol arrBitcastSym) ++ 
                   " = bitcast " ++ (genType PtrT) ++ " " ++ 
-                  (genLocSymbol arrMallocSym) ++ " to %array*"
+                  (genLocSymbol arrMallocSym) ++ " to " ++ (genType (ArrayT t))
   let arrCastedVal = VLocal (T (ArrayT t), arrBitcastSym)
   arrPtrSym <- newLocalSym
   let gepArrPtr = DList.singleton $ (genLocSymbol arrPtrSym) ++ 
-                  " = getelementptr %array, " ++ 
-                  (genTypedVal arrCastedVal) ++ ", i32 0, i32 0"
+                  " = getelementptr " ++ genArrayType ++ ", " ++ 
+                  (genTypedVal arrCastedVal) ++ ", " ++ (genType IntT) ++ 
+                  " 0, " ++ (genType IntT) ++ " 0"
   let storeArrPtr = DList.singleton $ "store " ++ 
                     (genTypedVal bitcastVal) ++ ", " ++ 
                     (genVarType (Ref PtrT)) ++ " " ++ (genLocSymbol arrPtrSym)
   lengthPtrSym <- newLocalSym
   let gepLengthPtr = DList.singleton $ (genLocSymbol lengthPtrSym) ++ 
-                  " = getelementptr %array, " ++
-                  (genTypedVal arrCastedVal) ++ ", i32 0, i32 1"
+                  " = getelementptr " ++ genArrayType ++ ", " ++
+                  (genTypedVal arrCastedVal) ++ ", " ++ (genType IntT) ++ 
+                  " 0, " ++ (genType IntT) ++ " 1"
   let storeLengthPtr = DList.singleton $ "store " ++ (genTypedVal v) ++
-                    ", i32* " ++ (genLocSymbol lengthPtrSym)
+                    ", " ++ (genVarType (Ref IntT)) ++ " " ++ 
+                    (genLocSymbol lengthPtrSym)
   return (DList.concat [
     code, check, alloca, bitcast, sizeOfType, sizeOfType', mul, 
     memset, sizeOfArr, sizeOfArr', arrMalloc, arrBitcast, gepArrPtr, 
@@ -187,13 +235,23 @@ genArrLength e  = do
   (code, v) <- genExpr e
   lengthPtrSym <- newLocalSym
   let gepLengthPtr = DList.singleton $ (genLocSymbol lengthPtrSym) ++ 
-                  " = getelementptr %array, " ++ (genTypedVal v) ++ 
-                  ", i32 0, i32 1"
+                  " = getelementptr " ++ genArrayType ++ ", " ++ 
+                  (genTypedVal v) ++ ", " ++ (genType IntT) ++ " 0, " ++ 
+                  (genType IntT) ++ " 1"
   let lengthPtrVal = VLocal (Ref IntT, lengthPtrSym)
   lengthSym <- newLocalSym
   let load = DList.singleton $ (genLocSymbol lengthSym) ++ " = load " ++
             (genType IntT) ++ ", " ++ (genTypedVal lengthPtrVal)
   return (DList.concat [code, gepLengthPtr, load], VLocal (T IntT, lengthSym))
+
+genECast :: Type -> Expr -> CM (Code, Val)
+genECast t e = do
+  (code, v) <- genExpr e
+  sym <- newLocalSym
+  let vCasted = VLocal (T t, sym)
+  let bitcast = DList.singleton $ (genLocSymbol sym) ++ " = bitcast " ++ 
+                (genTypedVal v)  ++ " to " ++ (genType t)
+  return (DList.concat [code, bitcast], vCasted)
 
 genBinaryOp :: Type -> Expr -> Expr -> String -> CM (Code, Val)
 genBinaryOp t e1 e2 instr = do
@@ -310,9 +368,15 @@ genExpr e = case e of
   ELitTrue _ -> return (DList.empty, VConst (CBool True))
   ELitFalse _ -> return (DList.empty, VConst (CBool False))
   EString _ s -> genEString s
+  ENull _ -> return (DList.empty, VConst CNull)
   ELVal _ lv -> genELVal lv
+  -- ESelf _ ->
   ECall _ id es -> genECall id es
+  -- EMetCall _ e id es ->
+  ENewObj _ tt -> genENewObj (convType tt)
   ENewArr _ tt e -> genENewArr (convType tt) e
+  ECast _ tt e -> genECast (convType tt) e
+  ECastClass _ (ELVal _ (LVar _ id)) e -> genECast (ClassT id) e
   ENeg pos e -> genAddOp (ELitInt pos 0) (OMinus pos) e
   ENot pos e -> genRelOp (ELitFalse pos) (OEq pos) e
   EMul _ e1 op e2 -> genMulOp e1 op e2

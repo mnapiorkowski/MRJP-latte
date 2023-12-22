@@ -19,7 +19,7 @@ data VarType = T Type | Ref Type | StringLit Int
 type Var = (VarType, Symbol)
 data Val = VConst Const | VLocal Var | VGlobal Var
 
-type CEnv = FuncEnv
+type CEnv = (FuncEnv, ClassEnv)
 
 type Locals = Map Ident Var
 type Globals = Map Ident Var

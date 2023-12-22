@@ -7,6 +7,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 
 import Latte.Abs
+import Latte.Print (printTree)
 
 import Common
 import Frontend.Types
@@ -17,7 +18,7 @@ showType BoolT = "bool"
 showType StringT = "string"
 showType VoidT = "void"
 showType (ArrayT t) = (showType t) ++ "[]"
-showType (ClassT (Ident id)) = id
+showType (ClassT id) = printTree id
 
 getVarEnv :: TM VarEnv
 getVarEnv = do
@@ -39,20 +40,20 @@ getVarsInBlock = do
   (_, _, _, varsInBlock) <- ask
   return varsInBlock
 
-setVar :: Type -> Ident -> TM Env
-setVar t id = do
+setVar :: Ident -> Type -> TM Env
+setVar id t = do
   (varEnv, funcEnv, classEnv, varsInBlock) <- ask
   let varEnv' = Map.insert id t varEnv
   let varsInBlock' = Set.insert id varsInBlock
   return (varEnv', funcEnv, classEnv, varsInBlock')
 
-setFunc :: Type -> Ident -> [Type] -> TM Env
-setFunc t id paramTs = do
+setFunc :: Ident -> Type -> [Type] -> TM Env
+setFunc id t paramTs = do
   (varEnv, funcEnv, classEnv, varsInBlock) <- ask
   let funcEnv' = Map.insert id (t, paramTs) funcEnv
   return (varEnv, funcEnv', classEnv, varsInBlock)
 
-setClass :: Ident -> VarEnv -> TM Env
+setClass :: Ident -> AttrEnv -> TM Env
 setClass id attributes = do
   (varEnv, funcEnv, classEnv, varsInBlock) <- ask
   let classEnv' = Map.insert id attributes classEnv

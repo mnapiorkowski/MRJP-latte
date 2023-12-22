@@ -1,6 +1,7 @@
 module Backend.Generator.Statements where
 
 import Control.Monad.State
+import Control.Monad.Reader
 
 import qualified Data.Map as Map
 import qualified Data.DList as DList
@@ -20,28 +21,25 @@ genSExp e = do
   (code, _) <- genExpr e
   return (code, False)
 
+genInit' :: Type -> Ident -> String -> CM Code
+genInit' t id s = do
+  sym <- newLocalSym
+  let newVar = (Ref t, sym)
+  setLocal id newVar
+  let alloca = DList.singleton $ (genLocSymbol sym) ++ " = alloca " ++ 
+              (genType t)
+  let store = DList.singleton $ "store " ++ s ++ 
+              ", " ++ (genTypedVal (VLocal newVar))
+  return $ DList.concat [alloca, store]
+
 genInit :: Type -> Ident -> Expr -> CM Code
 genInit t id e = do
   (code, v) <- genExpr e
-  sym <- newLocalSym
-  let newVar = (Ref t, sym)
-  setLocal id newVar
-  let alloca = DList.singleton $ (genLocSymbol sym) ++ " = alloca " ++ 
-              (genType t)
-  let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
-              ", " ++ (genTypedVal (VLocal newVar))
-  return $ DList.concat [code, alloca, store]
+  init <- genInit' t id (genTypedVal v)
+  return $ DList.concat [code, init]
 
 genNoInit :: Type -> Ident -> CM Code
-genNoInit t id = do
-  sym <- newLocalSym
-  let newVar = (Ref t, sym)
-  setLocal id newVar
-  let alloca = DList.singleton $ (genLocSymbol sym) ++ " = alloca " ++ 
-              (genType t)
-  let store = DList.singleton $ "store " ++ (genDefaultValue t) ++ 
-              ", " ++ (genTypedVal (VLocal newVar))
-  return $ DList.concat [alloca, store]
+genNoInit t id = genInit' t id (genTypedDefaultVal t)
 
 genDecl :: Type -> Item -> CM Code
 genDecl t i = case i of
@@ -63,16 +61,11 @@ genSDecl tt is = do
 genSAss :: LVal -> Expr -> CM (Code, HasRet)
 genSAss lv e = case lv of
   LVar _ id -> do
-    var@(t, sym) <- getLocal id
-    case sym of
-      NumSym _ -> do
-        (code, v) <- genExpr e
-        let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
-                    ", " ++ (genTypedVal (VLocal var))
-        return (DList.concat [code, store], False)
-      StrSym str -> do
-        code <- genInit (convVarType t) id e
-        return (code, False)
+    var <- getLocal id
+    (code, v) <- genExpr e
+    let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
+                ", " ++ (genTypedVal (VLocal var))
+    return (DList.concat [code, store], False)
   LArr _ eArr eIdx -> do
     (arrCode, v) <- genExpr eArr
     (code, arr) <- genGetArrayPtr v
@@ -87,6 +80,22 @@ genSAss lv e = case lv of
     return (DList.concat [
       arrCode, code, lengthCode, idx, check, check2, elemCode, exprCode, store
       ], False)
+  LAttr _ eObj id -> do
+    (objCode, vObj) <- genExpr eObj
+    let t = convVarType $ valType vObj
+    (_, classEnv) <- ask
+    let attributes = classEnv Map.! (classIdent t)
+    let (num, attrT) = attributes Map.! id
+    ptrSym <- newLocalSym
+    let ptr = VLocal (Ref attrT, ptrSym)
+    let gep = DList.singleton $ (genLocSymbol ptrSym) ++ 
+              " = getelementptr " ++ (genClassType (classIdent t)) ++ ", " ++ 
+              (genTypedVal vObj) ++ ", " ++ (genType IntT) ++ 
+              " 0, " ++ (genType IntT) ++ " " ++ show num
+    (code, v) <- genExpr e
+    let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
+                ", " ++ (genTypedVal ptr)
+    return $ (DList.concat [objCode, gep, code, store], False)
 
 genSIncrDecr :: Pos -> LVal -> AddOp -> CM (Code, HasRet)
 genSIncrDecr pos lv op = genSAss lv (EAdd pos (ELVal pos lv) op (ELitInt pos 1))

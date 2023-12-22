@@ -15,11 +15,13 @@ import Latte.Print (printTree)
 type Pos = BNFC'Position
 
 type FuncEnv = Map Ident (Type, [Type])
+type AttrEnv = Map Ident (Int, Type)
+type ClassEnv = Map Ident AttrEnv -- for objects (AttrEnv, MethodEnv)
 
 data Type = IntT | StringT | BoolT | VoidT | ArrayT Type | PtrT | ClassT Ident
   deriving Eq
 
-data Const = CInt Integer | CBool Bool
+data Const = CInt Integer | CBool Bool | CNull
 
 convType :: TType -> Type
 convType (TInt _) = IntT

@@ -23,7 +23,7 @@ setFuncId pos id = do
   if Map.member id funcEnv
     then throwE pos $
       "function " ++ printTree id ++ " is already defined"
-  else setFunc PtrT id []
+  else setFunc id PtrT []
 
 setClassId :: Pos -> Ident -> TM Env
 setClassId pos id = do
@@ -70,11 +70,11 @@ checkFuncSignature pos tt id ps = do
     then throwE pos $ "function returns invalid type " ++ showType t
   else do
     paramTs <- typeOfParams ps
-    setFunc t id paramTs
+    setFunc id t paramTs
 
-checkMembers' :: [CMember] -> VarEnv -> TM VarEnv
-checkMembers' [] attributes = return attributes
-checkMembers' (m:ms) attributes = case m of
+checkMembers' :: [CMember] -> Int -> AttrEnv -> TM AttrEnv
+checkMembers' [] _ attributes = return attributes
+checkMembers' (m:ms) num attributes = case m of
   CAttr pos tt id -> do
     if Map.member id attributes
       then throwE pos $
@@ -83,13 +83,13 @@ checkMembers' (m:ms) attributes = case m of
       let t = convType tt
       isValid <- isValidType t
       if isValid
-        then checkMembers' ms (Map.insert id t attributes)
+        then checkMembers' ms (succ num) (Map.insert id (num, t) attributes)
       else throwE pos $
         "invalid type " ++ showType t ++ " of class attribute"
-  CMethod pos tt id as b -> checkMembers' ms attributes -- TODO: check methods signatures
+  CMethod pos tt id as b -> checkMembers' ms num attributes -- TODO: check methods signatures
 
-checkMembers :: ClassBlock -> TM VarEnv
-checkMembers (CBlock _ ms) = checkMembers' ms Map.empty
+checkMembers :: ClassBlock -> TM AttrEnv
+checkMembers (CBlock _ ms) = checkMembers' ms 0 Map.empty
 
 checkClassMembers :: Ident -> ClassBlock -> TM Env
 checkClassMembers id cb = do
@@ -115,7 +115,7 @@ checkParam (AArg pos tt id) = do
     then throwE pos $
       "function parameters have the same identifiers " ++ 
       printTree id
-  else setVar t id
+  else setVar id t
 
 checkParams :: [Arg] -> TM Env
 checkParams [] = ask
@@ -189,10 +189,10 @@ checkTopDefs2 (d:ds) = do
   checkTopDef2 d
   checkTopDefs2 ds
 
-checkProgr :: Program -> TM FuncEnv
+checkProgr :: Program -> TM (FuncEnv, ClassEnv)
 checkProgr (Progr pos ds) = do
   env <- setTopDefs ds
-  env'@(_, funcEnv, _, _) <- local (const env) $ checkTopDefs1 ds
+  env'@(_, funcEnv, classEnv, _) <- local (const env) $ checkTopDefs1 ds
   local (const env') $ checkTopDefs2 ds
   let main = Ident "main"
   if Map.notMember main funcEnv
@@ -206,9 +206,9 @@ checkProgr (Progr pos ds) = do
     else if not $ null paramTs
       then throwE pos $
         "main function cannot have any parameters"
-    else return funcEnv
+    else return (funcEnv, classEnv)
 
-typecheck :: Program -> IO FuncEnv
+typecheck :: Program -> IO (FuncEnv, ClassEnv)
 typecheck p = do
   let initVarEnv = Map.empty
   let initFuncEnv = Map.fromList [

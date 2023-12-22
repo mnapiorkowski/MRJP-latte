@@ -48,11 +48,12 @@ SFor.           Stmt ::= "for" "(" TType Ident ":" Expr ")" Stmt ;
 
 -- Types ---------------------------------------------------
 
-TInt.           TType ::= "int" ;
-TBool.          TType ::= "boolean" ;
-TString.        TType ::= "string" ;
-TVoid.          TType ::= "void" ;
-TArray.         TType ::= TType "[]" ;
+TInt.           TType1 ::= "int" ;
+TBool.          TType1 ::= "boolean" ;
+TString.        TType1 ::= "string" ;
+TVoid.          TType1 ::= "void" ;
+TArray.         TType1 ::= TType "[]" ;
+_.              TType ::= TType1 ;
 TClass.         TType ::= Ident ;
 
 -- Expressions ---------------------------------------------
@@ -71,7 +72,8 @@ EMetCall.       Expr7 ::= Expr7 "." Ident "(" [Expr] ")" ;
 ENewObj.        Expr6 ::= "new" TType ;
 ENewArr.        Expr6 ::= "new" TType "[" Expr "]" ;
 
-ECast.          Expr5 ::= "(" TType ")" Expr6 ;
+ECast.          Expr5 ::= "(" TType1 ")" Expr6 ;
+ECastClass.     Expr5 ::= "(" Expr ")" Expr6 ; 
 ENeg.           Expr5 ::= "-" Expr6 ;
 ENot.           Expr5 ::= "!" Expr6 ;
 
