@@ -16,7 +16,9 @@ type Pos = BNFC'Position
 
 type FuncEnv = Map Ident (Type, [Type])
 type AttrEnv = Map Ident (Int, Type)
-type ClassEnv = Map Ident AttrEnv -- for objects (AttrEnv, MethodEnv)
+type MethodEnv = FuncEnv
+type Super = Maybe Ident
+type ClassEnv = Map Ident (AttrEnv, MethodEnv, Super)
 
 data Type = IntT | StringT | BoolT | VoidT | ArrayT Type | PtrT | ClassT Ident
   deriving Eq

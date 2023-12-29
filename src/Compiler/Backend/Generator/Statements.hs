@@ -83,8 +83,7 @@ genSAss lv e = case lv of
   LAttr _ eObj id -> do
     (objCode, vObj) <- genExpr eObj
     let t = convVarType $ valType vObj
-    (_, classEnv) <- ask
-    let attributes = classEnv Map.! (classIdent t)
+    attributes <- getAttributes (classIdent t)
     let (num, attrT) = attributes Map.! id
     ptrSym <- newLocalSym
     let ptr = VLocal (Ref attrT, ptrSym)
@@ -194,10 +193,10 @@ genSWhile e s = case tryEval e of
 
 genSFor :: Type -> Ident -> Expr -> Stmt -> CM (Code, HasRet)
 genSFor t id e s = do
+  (code, v) <- genExpr e
   lBefore <- newLabel
   let brBefore = DList.singleton $ "br " ++ (genTypedLabel lBefore)
   let label1 = DList.singleton $ genLabel lBefore
-  (code, v) <- genExpr e
   (lengthCode, length) <- genGetArrayLength v
   (arrCode, arr) <- genGetArrayPtr v
   lLoop <- newLabel
@@ -231,7 +230,7 @@ genSFor t id e s = do
               ", " ++ (genTypedLabel lAfter)
   let label4 = DList.singleton $ genLabel lAfter
   return (DList.concat [
-    brBefore, label1, code, lengthCode, arrCode, brLoop, 
+    code, brBefore, label1, lengthCode, arrCode, brLoop, 
     label2, phi, incr, elemCode, stmtCode, brCheck, label3, icmp, brCond, label4
     ], False)
 

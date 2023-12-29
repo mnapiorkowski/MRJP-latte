@@ -19,6 +19,7 @@ showType StringT = "string"
 showType VoidT = "void"
 showType (ArrayT t) = (showType t) ++ "[]"
 showType (ClassT id) = printTree id
+showType PtrT = "null"
 
 getVarEnv :: TM VarEnv
 getVarEnv = do
@@ -34,6 +35,24 @@ getClassEnv :: TM ClassEnv
 getClassEnv = do
   (_, _, classEnv, _) <- ask
   return classEnv
+
+getAttributes :: Ident -> TM AttrEnv
+getAttributes classId = do
+  classEnv <- getClassEnv
+  let (attributes, _, _) = classEnv Map.! classId
+  return attributes
+
+getMethods :: Ident -> TM MethodEnv
+getMethods classId = do
+  classEnv <- getClassEnv
+  let (_, methods, _) = classEnv Map.! classId
+  return methods
+
+getSuper :: Ident -> TM Super
+getSuper classId = do
+  classEnv <- getClassEnv
+  let (_, _, super) = classEnv Map.! classId
+  return super  
 
 getVarsInBlock :: TM VarsInBlock
 getVarsInBlock = do
@@ -53,10 +72,10 @@ setFunc id t paramTs = do
   let funcEnv' = Map.insert id (t, paramTs) funcEnv
   return (varEnv, funcEnv', classEnv, varsInBlock)
 
-setClass :: Ident -> AttrEnv -> TM Env
-setClass id attributes = do
+setClass :: Ident -> AttrEnv -> MethodEnv -> Super -> TM Env
+setClass id attributes methods super = do
   (varEnv, funcEnv, classEnv, varsInBlock) <- ask
-  let classEnv' = Map.insert id attributes classEnv
+  let classEnv' = Map.insert id (attributes, methods, super) classEnv
   return (varEnv, funcEnv, classEnv', varsInBlock)
 
 isValidType :: Type -> TM Bool
@@ -64,7 +83,29 @@ isValidType (ClassT id) = do
   classEnv <- getClassEnv
   return (Map.member id classEnv)
 isValidType (ArrayT t) = isValidType t
+isValidType VoidT = return False
 isValidType _ = return True
+
+isSuperClassOf :: Ident -> Ident -> TM Bool
+isSuperClassOf superId subId  = do
+  super <- getSuper subId
+  case super of
+    Just superSubId -> do
+      if superId == superSubId
+        then return True
+      else isSuperClassOf superId superSubId 
+    Nothing -> return False 
+
+areTypesCompatible :: Type -> Type -> TM Bool
+areTypesCompatible t1 t2 = do
+  if t1 == t2
+    then return True
+  else if (isClassType t1) && (isClassType t2)
+    then do
+      let id1 = classIdent t1
+      let id2 = classIdent t2
+      isSuperClassOf id1 id2
+  else return False
 
 throwE :: Pos -> String -> TM a
 throwE pos s = lift $ E.throwError (posStr pos ++ s)

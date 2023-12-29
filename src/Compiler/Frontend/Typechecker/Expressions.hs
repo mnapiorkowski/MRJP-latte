@@ -1,6 +1,7 @@
 module Frontend.Typechecker.Expressions where
 
 import Control.Monad.Reader
+import Control.Monad.State
 
 import qualified Data.Map as Map
 
@@ -14,10 +15,11 @@ import Frontend.Utils
 checkUnaryOp :: Pos -> Type -> Expr -> TM ()
 checkUnaryOp pos t e = do
   exprT <- typeOfExpr e
-  if exprT /= t
+  compatible <- areTypesCompatible t exprT
+  if not compatible
     then throwE pos $
       "wrong type of expression: " ++ printTree e ++
-      "\nexpected type: " ++ showType t
+      ", expected type: " ++ showType t
   else return ()
 
 checkBinaryOp :: Pos -> Type -> Expr -> Expr -> TM ()
@@ -47,20 +49,42 @@ typeOfRelOp pos e1 op e2 = case op of
   OEq pos' -> do
     t1 <- typeOfExpr e1
     t2 <- typeOfExpr e2
-    if (t1 == t2)
-      then return BoolT
-    else throwE pos $
-      "equality operator applied to different types: " ++ 
-      showType t1 ++ " and " ++ showType t2
+    compatible1 <- areTypesCompatible t1 t2
+    compatible2 <- areTypesCompatible t2 t1
+    if (not compatible1) && (not compatible2)
+      then throwE pos $
+        "equality operator applied to different types: " ++ 
+        showType t1 ++ " and " ++ showType t2
+    else if (t1 == VoidT)
+      then throwE pos $ "cannot compare void-type expressions"
+    else return BoolT
   ONeq pos' -> typeOfRelOp pos e1 (OEq pos') e2 
   _ -> checkBinaryOp pos IntT e1 e2 >> return BoolT
 
+typeOfVarInClass :: Pos -> Ident-> Ident -> TM Type
+typeOfVarInClass pos id classId = do
+  attributes <- getAttributes classId
+  if Map.member id attributes
+    then do
+      let (_, t) = attributes Map.! id
+      return t
+  else do
+    super <- getSuper classId
+    case super of
+      Just superId -> typeOfVarInClass pos id superId
+      Nothing -> throwE pos $ 
+        "undeclared variable or attribute: " ++ printTree id
+
 typeOfVar :: Pos -> Ident -> TM Type
 typeOfVar pos id = do
-  varEnv <- getVarEnv
+  varEnv <- getVarEnv 
   if Map.notMember id varEnv
-    then throwE pos $
-      "variable " ++ printTree id ++ " is not declared"
+    then do
+      (_, inClass) <- get
+      case inClass of
+        Just classId -> typeOfVarInClass pos id classId
+        Nothing -> throwE pos $
+          "variable " ++ printTree id ++ " is not declared"
   else return $ varEnv Map.! id
 
 typeOfLVal :: Pos -> LVal -> TM Type
@@ -84,8 +108,7 @@ typeOfLVal pos lv = case lv of
       then throwE pos $ "type " ++ showType t ++ 
         " does not have the attribute " ++ printTree id
     else do
-      classEnv <- getClassEnv
-      let attributes = classEnv Map.! (classIdent t)
+      attributes <- getAttributes (classIdent t)
       if Map.notMember id attributes
         then throwE pos $ "class " ++ showType t ++ 
           " does not have the attribute " ++ printTree id
@@ -93,14 +116,18 @@ typeOfLVal pos lv = case lv of
         let (_, retT) = attributes Map.! id
         return retT
 
--- typeOfSelf :: Pos -> TM Type
--- typeOfSelf pos = do
--- TODO: check if self is inside of a class
+typeOfSelf :: Pos -> TM Type
+typeOfSelf pos = do
+  (_, inClass) <- get
+  case inClass of
+    Just id -> return $ ClassT id
+    Nothing -> throwE pos $ "'self' used outside of a class"
 
 checkArg :: Pos -> Ident -> Type -> Expr -> TM ()
 checkArg pos id t e = do
   argT <- typeOfExpr e
-  if argT /= t
+  compatible <- areTypesCompatible t argT
+  if not compatible
     then throwE pos $
       "types of arguments passed to function " ++ 
       printTree id ++ " do not match function's signature"
@@ -116,27 +143,64 @@ checkArgs pos id (t:ts) (e:es) = do
   checkArg pos id t e
   checkArgs pos id ts es
 
+typeOfCallInClass :: Pos -> Ident -> [Expr] -> Ident -> TM Type
+typeOfCallInClass pos id es classId = do
+  methods <- getMethods classId
+  if Map.member id methods
+    then do
+      let (retT, paramTs) = methods Map.! id
+      checkArgs pos id paramTs es
+      return retT
+  else do
+    super <- getSuper classId
+    case super of
+      Just superId -> typeOfCallInClass pos id es superId
+      Nothing -> throwE pos $ 
+        "undefined function or method: " ++ printTree id
+
 typeOfCall :: Pos -> Ident -> [Expr] -> TM Type
 typeOfCall pos id es = do
   funcEnv <- getFuncEnv
   if id == Ident "main"
     then throwE pos "cannot call main function"
   else if Map.notMember id funcEnv
-    then throwE pos $
-      "function " ++ printTree id ++ " is not defined"
+    then do
+      (_, inClass) <- get
+      case inClass of
+        Just classId -> typeOfCallInClass pos id es classId
+        Nothing -> throwE pos $
+          "function " ++ printTree id ++ " is not defined"
   else do
     let (retT, paramTs) = funcEnv Map.! id
     checkArgs pos id paramTs es
     return retT
 
--- typeOfMetCall :: Pos -> Expr -> Ident -> [Expr] -> TM Type
--- typeOfMetCall pos e id es = do
+typeOfMetCall :: Pos -> Expr -> Ident -> [Expr] -> TM Type
+typeOfMetCall pos e id es = do
+  t <- typeOfExpr e
+  isValid <- isValidType t
+  if not isValid
+    then throwE pos $ "invalid type: " ++ showType t
+  else if not (isClassType t)
+    then throwE pos $ 
+      "cannot call a method on expression of type " ++ showType t
+  else do
+    methods <- getMethods (classIdent t)
+    if Map.notMember id methods
+      then throwE pos $ 
+        "class " ++ showType t ++ " does not have a method " ++ printTree id
+    else do
+      let (retT, paramTs) = methods Map.! id
+      checkArgs pos id paramTs es
+      return retT
 
 typeOfNewObj :: Pos -> TType -> TM Type
 typeOfNewObj pos tt = do
   let t = convType tt
   isValid <- isValidType t
-  if (not (isClassType t)) || (not isValid)
+  if not isValid
+    then throwE pos $ "invalid type: " ++ showType t
+  else if not (isClassType t)
     then throwE pos $
       "cannot construct object of type " ++ showType t
   else return t
@@ -149,9 +213,7 @@ typeOfNewArr pos tt e = do
   else do
     let t = convType tt
     isValid <- isValidType t
-    if t == VoidT
-      then throwE pos "cannot construct a void-type array"
-    else if not isValid
+    if not isValid
       then throwE pos $ "cannot construct an array of type " ++ showType t
     else return (ArrayT t)
 
@@ -184,9 +246,9 @@ typeOfExpr e = case e of
   EString _ _ -> return StringT
   ENull _ -> return PtrT
   ELVal pos lv -> typeOfLVal pos lv
-  -- ESelf pos -> typeOfSelf pos
+  ESelf pos -> typeOfSelf pos
   ECall pos id es -> typeOfCall pos id es
-  -- EMetCall pos e id es -> typeOfMetCall pos e id es
+  EMetCall pos e id es -> typeOfMetCall pos e id es
   ENewObj pos tt -> typeOfNewObj pos tt
   ENewArr pos tt e -> typeOfNewArr pos tt e
   ECast pos tt e -> typeOfCast pos tt e

@@ -14,8 +14,10 @@ BBlock.         Block ::= "{" [Stmt] "}" ;
 CBlock.         ClassBlock ::= "{" [CMember] "}" ;
 
 separator       CMember "" ;
-CAttr.          CMember ::= TType Ident ";" ;
 CMethod.        CMember ::= TType Ident "(" [Arg] ")" Block ; 
+CAttr.          CMember ::= TType [AttrItem] ";" ;
+AttrNoInit.     AttrItem ::= Ident ;
+separator       nonempty AttrItem "," ;
 
 -- statements ----------------------------------------------
 

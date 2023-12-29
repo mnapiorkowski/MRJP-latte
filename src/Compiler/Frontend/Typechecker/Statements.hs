@@ -30,10 +30,11 @@ checkNoInit pos t id = do
 checkInit :: Pos -> Type -> Ident -> Expr -> TM Env
 checkInit pos t id e = do
   exprT <- typeOfExpr e
-  if exprT /= t
+  compatible <- areTypesCompatible t exprT
+  if not compatible
     then throwE pos $ 
-      "wrong type of expression: " ++ printTree e ++
-      "\nin definition of " ++ showType t ++ " " ++ printTree id
+      "wrong type of expression " ++ printTree e ++
+      " in definition of " ++ showType t ++ " " ++ printTree id
   else checkNoInit pos t id
 
 checkDecl :: Type -> Item -> TM Env
@@ -51,13 +52,7 @@ checkSDecl :: Pos -> TType -> [Item] -> TM Env
 checkSDecl pos tt is = do
   let t = convType tt
   isValid <- isValidType t
-  if t == VoidT
-    then throwE pos $
-      "declared void-type variable " ++ printTree is
-  else if t == (ArrayT VoidT)
-    then throwE pos $
-      "declared void-type array " ++ printTree is
-  else if not isValid
+  if not isValid
     then throwE pos $
       "invalid type " ++ showType t ++ " in declaration of " ++ printTree is
   else do
@@ -86,31 +81,33 @@ checkSIncrDecr pos lv = do
     then throwE pos $
       "increment or decrement operator applied to non-int-type variable " ++ 
       printTree lv
-  else ask
+  else case lv of
+    LAttr _ e' id -> do
+      t <- typeOfExpr e'
+      if (isArrayType t) && (id == Ident "length")
+        then throwE pos $ "cannot modify array's attribute 'length'"
+      else ask
+    _ -> ask
 
 checkSRet :: Pos -> Expr -> TM Env
 checkSRet pos e = do
   t <- typeOfExpr e
-  funcId <- get
-  env@(_, funcEnv, _, _) <- ask
-  let (retT, _) = funcEnv Map.! funcId
-  if t /= retT
+  (retT, _) <- get
+  compatible <- areTypesCompatible retT t
+  if not compatible
     then throwE pos $
-      "return type of function " ++ printTree funcId ++ 
-      " does not match function's signature"
+      "return type of function does not match function's signature"
   else if t == VoidT
     then throwE pos $ "cannot return void-type expression"
-  else return env
+  else ask
 
 checkSVRet :: Pos -> TM Env
 checkSVRet pos = do
-  funcId <- get
-  env@(_, funcEnv, _, _) <- ask
-  let (retT, _) = funcEnv Map.! funcId
+  (retT, _) <- get
   if retT /= VoidT
     then throwE pos $
-      "void return in non-void function " ++ printTree funcId
-  else return env
+      "void return in non-void function"
+  else ask
 
 checkIfExpr :: Pos -> Expr -> TM ()
 checkIfExpr pos e = do
@@ -150,17 +147,24 @@ checkSFor pos tt id e s = do
   if not isValid
     then throwE pos $
       "invalid type " ++ showType t ++ " of a variable in for loop"
-  else if exprT /= (ArrayT t)
+  else if not (isArrayType exprT)
     then throwE pos $
       "wrong type of expression in for loop: " ++ printTree e ++
-      "\nexpected type: " ++ showType (ArrayT t)
+      ", expected an array"
   else do
-    (varEnv, funcEnv, classEnv, _) <- setVar id t
-    let blockEnv = (varEnv, funcEnv, classEnv, Set.singleton id)
-    case s of
-      SBlock _ (BBlock _ ss) -> local (const blockEnv) $ checkStmts ss
-      _ -> local (const blockEnv) $ checkStmt s
-    ask
+    let elemT = typeOfArrayElem exprT
+    compatible <- areTypesCompatible t elemT
+    if not compatible
+      then throwE pos $ 
+        "wrong type of iterative variable " ++ printTree id ++ 
+        " in for loop, expected " ++ showType elemT
+    else do
+      (varEnv, funcEnv, classEnv, _) <- setVar id t
+      let blockEnv = (varEnv, funcEnv, classEnv, Set.singleton id)
+      case s of
+        SBlock _ (BBlock _ ss) -> local (const blockEnv) $ checkStmts ss
+        _ -> local (const blockEnv) $ checkStmt s
+      ask
 
 checkStmt :: Stmt -> TM Env
 checkStmt s = case s of

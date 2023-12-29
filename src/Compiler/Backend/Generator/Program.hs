@@ -8,7 +8,7 @@ import Control.Monad.Reader
 
 import qualified Data.Map as Map
 import qualified Data.DList as DList
-import Data.List (isPrefixOf, isSuffixOf)
+import Data.List (isPrefixOf, isSuffixOf, intercalate)
 
 import Latte.Abs
 
@@ -86,7 +86,8 @@ genFunc tt (Ident id) as b = do
 
 genAttribute :: CMember -> CM String
 genAttribute m = case m of
-  CAttr _ tt id -> return $ genType (convType tt)
+  CAttr _ tt is -> return $ intercalate ", " $
+    take (length is) (repeat (genType (convType tt)))
   CMethod _ tt id as b -> return ""
 
 genAttributes' :: [CMember] -> CM String
@@ -96,6 +97,8 @@ genAttributes' (m:ms) = do
   msStr <- genAttributes' ms
   if msStr == ""
     then return mStr
+  else if mStr == ""
+    then return msStr
   else return $ mStr ++ ", " ++ msStr
 
 genAttributes :: ClassBlock -> CM String

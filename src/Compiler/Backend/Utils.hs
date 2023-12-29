@@ -1,7 +1,7 @@
 module Backend.Utils where
 
 import Control.Monad.State
-import Control.Monad.Reader ( lift )
+import Control.Monad.Reader
 import qualified Control.Monad.Except as E ( throwError )
 
 import qualified Data.Map as Map
@@ -132,6 +132,24 @@ getGlobal id = gets (\(_, globals, _) -> globals Map.! id)
 
 tryGetGlobal :: Ident -> CM (Maybe Var)
 tryGetGlobal id = gets (\(_, globals, _) -> Map.lookup id globals)
+
+getAttributes :: Ident -> CM AttrEnv
+getAttributes classId = do
+  (_, classEnv) <- ask
+  let (attributes, _, _) = classEnv Map.! classId
+  return attributes
+
+getMethods :: Ident -> CM MethodEnv
+getMethods classId = do
+  (_, classEnv) <- ask
+  let (_, methods, _) = classEnv Map.! classId
+  return methods
+
+getSuper :: Ident -> CM Super
+getSuper classId = do
+  (_, classEnv) <- ask
+  let (_, _, super) = classEnv Map.! classId
+  return super  
 
 newLabel :: CM Symbol
 newLabel = do

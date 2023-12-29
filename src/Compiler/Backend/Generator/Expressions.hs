@@ -104,8 +104,7 @@ genELVal lv = case lv of
         (lengthCode, vLength) <- genGetArrayLength v
         return (DList.concat [code, lengthCode], vLength)
     else do
-      (_, classEnv) <- ask
-      let attributes = classEnv Map.! (classIdent t)
+      attributes <- getAttributes (classIdent t)
       let (num, attrT) = attributes Map.! id
       ptrSym <- newLocalSym
       let ptr = VLocal (Ref attrT, ptrSym)
@@ -156,9 +155,9 @@ genENewObj t@(ClassT id) = do
   let allocaVal = VLocal (T t, allocaSym)
   let alloca = DList.singleton $ (genLocSymbol allocaSym) ++ " = alloca " ++ 
                 genClassType id
-  (_, classEnv) <- ask
-  let attributes = Map.elems $ classEnv Map.! id
-  inits <- genAttrInits allocaVal attributes DList.empty
+  attributes <- getAttributes id
+  let attrList = Map.elems attributes
+  inits <- genAttrInits allocaVal attrList DList.empty
   return (DList.concat [alloca, inits], allocaVal)
 
 genENewArr :: Type -> Expr -> CM (Code, Val)

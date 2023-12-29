@@ -18,8 +18,9 @@ type VarEnv = Map Ident Type
 type VarsInBlock = Set Ident
 type Env = (VarEnv, FuncEnv, ClassEnv, VarsInBlock)
 
-type CurrentFunc = Ident
-type Context = (CurrentFunc)
+type RetType = Type
+type InClass = Maybe Ident
+type Context = (RetType, InClass)
 
 type Result = Except String
 type TM a = StateT Context (ReaderT Env Result) a
