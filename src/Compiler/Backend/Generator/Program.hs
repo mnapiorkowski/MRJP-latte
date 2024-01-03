@@ -35,9 +35,9 @@ declarations = DList.fromList [
   "declare void @error()",
   "declare i32 @readInt()",
   "declare i8* @readString()",
-  "declare i8* @concatStrings(i8*, i8*)",
-  "declare i8* @malloc(i32)",
-  "declare i8* @memset(i8*, i32, i32)",
+  "declare i8* @_concatStrings(i8*, i8*)",
+  "declare void @_clearNElems(i8*, i32, i32)",
+  "declare %_array* @_mallocArrayType()",
   ""
   ]
 

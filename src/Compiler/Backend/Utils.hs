@@ -25,7 +25,7 @@ genClassType :: Ident -> String
 genClassType id = "%" ++ printTree id
 
 genArrayType :: String
-genArrayType = genClassType (Ident "array")
+genArrayType = genClassType (Ident "_array")
 
 genDefaultVal :: Type -> String
 genDefaultVal t = case t of

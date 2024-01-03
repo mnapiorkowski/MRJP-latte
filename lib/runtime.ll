@@ -13,10 +13,13 @@ declare i32 @getchar()
 declare i8* @malloc(i32)
 declare void @free(i8*)
 declare void @memcpy(i8*, i8*, i32)
+declare i8* @memset(i8*, i32, i32)
 declare i32 @strlen(i8*)
 declare i8* @strcpy(i8*, i8*)
 declare i8* @strcat(i8*, i8*)
 declare void @exit(i32)
+
+%_array = type {i8*, i32}
 
 define void @printInt(i32 %x) {
   %dnl = getelementptr [4 x i8], [4 x i8]* @dnl, i32 0, i32 0
@@ -80,7 +83,7 @@ End:
   ret i8* %line
 }
 
-define i8* @concatStrings(i8* %a, i8* %b) {
+define i8* @_concatStrings(i8* %a, i8* %b) {
   %is_a_null = icmp eq i8* %a, null
   br i1 %is_a_null, label %ANull, label %ANotNull
 ANull:
@@ -99,4 +102,18 @@ BNotNull:
   call i8* @strcpy(i8* %buff, i8* %a)
   call i8* @strcat(i8* %buff, i8* %b)
   ret i8* %buff
+}
+
+define void @_clearNElems(i8* %buff, i32 %num, i32 %elem_size) {
+  %size = mul i32 %num, %elem_size
+  call i8* @memset(i8* %buff, i32 0, i32 %size)
+  ret void
+}
+
+define %_array* @_mallocArrayType() {
+  %sizeptr = getelementptr %_array, %_array* null, i32 1
+  %size = ptrtoint %_array* %sizeptr to i32
+  %ptr = call i8* @malloc(i32 %size)
+  %res = bitcast i8* %ptr to %_array*
+  ret %_array* %res
 }

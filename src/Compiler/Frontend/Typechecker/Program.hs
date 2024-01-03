@@ -284,9 +284,9 @@ typecheck p = do
         (Ident "error", (VoidT, [])),
         (Ident "readInt", (IntT, [])),
         (Ident "readString", (StringT, [])),
-        (Ident "concatStrings", (StringT, [StringT, StringT])),
-        (Ident "malloc", (PtrT, [IntT])),
-        (Ident "memset", (PtrT, [PtrT, IntT, IntT]))
+        (Ident "_concatStrings", (StringT, [StringT, StringT])),
+        (Ident "_clearNElems", (PtrT, [PtrT, IntT, IntT])),
+        (Ident "_mallocArrayType", (ArrayT VoidT, []))
         ]
   let initClassEnv = Map.empty
   let initContext = (PtrT, Nothing)
