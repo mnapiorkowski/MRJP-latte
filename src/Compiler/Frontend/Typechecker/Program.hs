@@ -9,6 +9,7 @@ import Control.Monad.State
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.List as List
+import Data.Function (on)
 
 import Latte.Abs
 import Latte.Print (printTree)
@@ -256,11 +257,49 @@ checkTopDefs2 (d:ds) = do
   checkTopDef2 d
   checkTopDefs2 ds
 
+nextAttrNum :: AttrEnv -> Int
+nextAttrNum attrs = 1 + (maximum $ map fst (Map.elems attrs))
+
+mergeAttributes' :: Ident -> TM (AttrEnv, Int)
+mergeAttributes' classId = do
+  super <- getSuper classId
+  attrs <- getAttributes classId
+  case super of
+    Just superId -> do
+      (superAttrs, next) <- mergeAttributes' superId
+      -- let sorted = List.sortBy (compare `on` (fst . snd)) (Map.toList attrs)
+      -- let renumbered = Map.fromList $ zipWith (\(id, (oldNum, t)) newNum -> 
+      --                 (id, (newNum, t))) sorted [next..]
+      let renumbered = Map.map (\(num, t) -> (num + next, t)) attrs
+      let merged = Map.union superAttrs renumbered
+      return (merged, nextAttrNum renumbered)
+    Nothing -> do
+      next <- if Map.null attrs
+        then return 0
+        else return $ nextAttrNum attrs
+      return (attrs, next)
+
+mergeAttributes :: [Ident] -> [(Ident, AttrEnv)] -> TM [(Ident, AttrEnv)]
+mergeAttributes [] acc = return acc
+mergeAttributes (id:ids) acc = do
+  (attrEnv, _) <- mergeAttributes' id
+  mergeAttributes ids ((id, attrEnv):acc)
+
+updateAttrEnvs :: [(Ident, AttrEnv)] -> TM ClassEnv
+updateAttrEnvs [] = getClassEnv
+updateAttrEnvs ((id, attrEnv):t) = do
+  methods <- getMethods id
+  super <- getSuper id
+  env <- setClass id attrEnv methods super
+  local (const env) $ updateAttrEnvs t  
+
 checkProgr :: Program -> TM (FuncEnv, ClassEnv)
 checkProgr (Progr pos ds) = do
   env <- setTopDefs ds
   env'@(_, funcEnv, classEnv, _) <- local (const env) $ checkTopDefs1 ds
   local (const env') $ checkTopDefs2 ds
+  attrEnvs <- local (const env') $ mergeAttributes (Map.keys classEnv) []
+  classEnv' <- local (const env') $ updateAttrEnvs attrEnvs
   let main = Ident "main"
   if Map.notMember main funcEnv
     then throwE pos $
@@ -273,7 +312,7 @@ checkProgr (Progr pos ds) = do
     else if not $ null paramTs
       then throwE pos $
         "main function cannot have any parameters"
-    else return (funcEnv, classEnv)
+    else return (funcEnv, classEnv')
 
 typecheck :: Program -> IO (FuncEnv, ClassEnv)
 typecheck p = do
@@ -284,9 +323,9 @@ typecheck p = do
         (Ident "error", (VoidT, [])),
         (Ident "readInt", (IntT, [])),
         (Ident "readString", (StringT, [])),
-        (Ident "_concatStrings", (StringT, [StringT, StringT])),
-        (Ident "_clearNElems", (PtrT, [PtrT, IntT, IntT])),
-        (Ident "_mallocArrayType", (ArrayT VoidT, []))
+        (Ident (restrictName "concatStrings"), (StringT, [StringT, StringT])),
+        (Ident (restrictName "malloc"), (PtrT, [IntT])),
+        (Ident (restrictName "clearNElems"), (PtrT, [PtrT, IntT, IntT]))
         ]
   let initClassEnv = Map.empty
   let initContext = (PtrT, Nothing)

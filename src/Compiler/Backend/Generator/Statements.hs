@@ -12,8 +12,8 @@ import Common
 import Backend.Types
 import Backend.Utils
 import Backend.Generator.Expressions (
-  genExpr, genGetArrayPtr, genGetArrayElem, genGetArrayLength, genLoadVar,
-  genCheckAgainstVal
+  genExpr, genGetArrayPtr, genGetArrayElem, genGetArrayLength,
+  genCheckAgainstVal, genCastToSuper
   )
 
 genSExp :: Expr -> CM (Code, HasRet)
@@ -21,25 +21,39 @@ genSExp e = do
   (code, _) <- genExpr e
   return (code, False)
 
-genInit' :: Type -> Ident -> String -> CM Code
-genInit' t id s = do
+genStore :: Val -> Val -> CM Code
+genStore v vWhere = do
+  (cast, v') <- genCastToSuper v (convVarType $ dereference $ valType vWhere)
+  let store = DList.singleton $ "store " ++ (genTypedVal v') ++ 
+              ", " ++ (genTypedVal vWhere)
+  return $ DList.concat [cast, store]
+
+genInit' :: Type -> Ident -> Val -> CM Code
+genInit' t id v = do
   sym <- newLocalSym
   let newVar = (Ref t, sym)
   setLocal id newVar
   let alloca = DList.singleton $ (genLocSymbol sym) ++ " = alloca " ++ 
               (genType t)
-  let store = DList.singleton $ "store " ++ s ++ 
-              ", " ++ (genTypedVal (VLocal newVar))
+  store <- genStore v (VLocal newVar)
   return $ DList.concat [alloca, store]
 
 genInit :: Type -> Ident -> Expr -> CM Code
 genInit t id e = do
   (code, v) <- genExpr e
-  init <- genInit' t id (genTypedVal v)
+  init <- genInit' t id v
   return $ DList.concat [code, init]
 
 genNoInit :: Type -> Ident -> CM Code
-genNoInit t id = genInit' t id (genTypedDefaultVal t)
+genNoInit t id = do
+  sym <- newLocalSym
+  let newVar = (Ref t, sym)
+  setLocal id newVar
+  let alloca = DList.singleton $ (genLocSymbol sym) ++ " = alloca " ++ 
+              (genType t)
+  let store = DList.singleton $ "store " ++ (genTypedDefaultVal t) ++ 
+              ", " ++ (genTypedVal (VLocal newVar))
+  return $ DList.concat [alloca, store]
 
 genDecl :: Type -> Item -> CM Code
 genDecl t i = case i of
@@ -61,11 +75,13 @@ genSDecl tt is = do
 genSAss :: LVal -> Expr -> CM (Code, HasRet)
 genSAss lv e = case lv of
   LVar _ id -> do
-    var <- getLocal id
-    (code, v) <- genExpr e
-    let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
-                ", " ++ (genTypedVal (VLocal var))
-    return (DList.concat [code, store], False)
+    local <- tryGetLocal id
+    case local of
+      Just var -> do
+        (code, v) <- genExpr e
+        store <- genStore v (VLocal var)
+        return (DList.concat [code, store], False)
+      Nothing -> genSAss (LAttr Nothing (ESelf Nothing) id) e
   LArr _ eArr eIdx -> do
     (arrCode, v) <- genExpr eArr
     (code, arr) <- genGetArrayPtr v
@@ -75,8 +91,7 @@ genSAss lv e = case lv of
     check2 <- genCheckAgainstVal vIdx "sge" vLength
     (elemCode, elemPtr) <- genGetArrayElem arr vIdx
     (exprCode, v) <- genExpr e
-    let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
-                ", " ++ (genTypedVal elemPtr)
+    store <- genStore v elemPtr
     return (DList.concat [
       arrCode, code, lengthCode, idx, check, check2, elemCode, exprCode, store
       ], False)
@@ -92,18 +107,20 @@ genSAss lv e = case lv of
               (genTypedVal vObj) ++ ", " ++ (genType IntT) ++ 
               " 0, " ++ (genType IntT) ++ " " ++ show num
     (code, v) <- genExpr e
-    let store = DList.singleton $ "store " ++ (genTypedVal v) ++ 
-                ", " ++ (genTypedVal ptr)
+    store <- genStore v ptr
     return $ (DList.concat [objCode, gep, code, store], False)
 
-genSIncrDecr :: Pos -> LVal -> AddOp -> CM (Code, HasRet)
-genSIncrDecr pos lv op = genSAss lv (EAdd pos (ELVal pos lv) op (ELitInt pos 1))
+genSIncrDecr :: LVal -> AddOp -> CM (Code, HasRet)
+genSIncrDecr lv op = genSAss lv 
+  (EAdd Nothing (ELVal Nothing lv) op (ELitInt Nothing 1))
 
 genSRet :: Expr -> CM (Code, HasRet)
 genSRet e = do
   (code, v) <- genExpr e
-  let ret = DList.singleton $ "ret " ++ genTypedVal v
-  return (DList.concat [code, ret], True)
+  (_, _, _, (t)) <- get
+  (cast, v') <- genCastToSuper v t
+  let ret = DList.singleton $ "ret " ++ genTypedVal v'
+  return (DList.concat [code, cast, ret], True)
 
 genSVRet :: CM (Code, HasRet)
 genSVRet = return (DList.singleton ("ret " ++ (genType VoidT)), True)
@@ -207,12 +224,13 @@ genSFor t id e s = do
   let incr = DList.singleton $ (genLocSymbol incrSym) ++ " = add " ++ 
             (genType IntT) ++ " " ++ (genLocSymbol counterSym) ++ ", 1"
   (elemCode, elemVal) <- genGetArrayElem arr (VLocal (T IntT, counterSym))
+  (cast, elemVal') <- genCastToSuper elemVal t
 
-  (locals, _, _) <- get
-  setLocal id (valToVar elemVal)
+  (locals, _, _, _) <- get
+  setLocal id (valToVar elemVal')
   (stmtCode, hasRet) <- genStmt s
-  (_, globals, counters) <- get
-  put (locals, globals, counters)
+  (_, globals, counters, context) <- get
+  put (locals, globals, counters, context)
 
   lCheck <- newLabel
   let brCheck = DList.singleton $ "br " ++ (genTypedLabel lCheck)
@@ -230,8 +248,8 @@ genSFor t id e s = do
               ", " ++ (genTypedLabel lAfter)
   let label4 = DList.singleton $ genLabel lAfter
   return (DList.concat [
-    code, brBefore, label1, lengthCode, arrCode, brLoop, 
-    label2, phi, incr, elemCode, stmtCode, brCheck, label3, icmp, brCond, label4
+    code, brBefore, label1, lengthCode, arrCode, brLoop, label2, phi, incr,
+    elemCode, cast, stmtCode, brCheck, label3, icmp, brCond, label4
     ], False)
 
 genStmt :: Stmt -> CM (Code, HasRet)
@@ -241,15 +259,14 @@ genStmt s = case s of
   SExp _ e -> genSExp e
   SDecl _ tt is -> genSDecl tt is
   SAss _ lv e -> genSAss lv e
-  SIncr pos lv -> genSIncrDecr pos lv (OPlus pos)
-  SDecr pos lv -> genSIncrDecr pos lv (OMinus pos)
+  SIncr _ lv -> genSIncrDecr lv (OPlus Nothing)
+  SDecr _ lv -> genSIncrDecr lv (OMinus Nothing)
   SRet _ e -> genSRet e
   SVRet _ -> genSVRet
   SIf _ e s -> genSIf e s
   SIfElse _ e sIf sElse -> genSIfElse e sIf sElse
   SWhile _ e s -> genSWhile e s
   SFor _ tt id e s -> genSFor (convType tt) id e s
-  -- _ -> return (DList.empty, False)
 
 genStmts :: [Stmt]-> Code -> CM (Code, HasRet)
 genStmts [] acc = return (acc, False)
@@ -262,8 +279,8 @@ genStmts (h:t) acc = do
 
 genBlock :: Block -> CM (Code, HasRet)
 genBlock (BBlock _ ss) = do
-  (locals, _, _) <- get
+  (locals, _, _, _) <- get
   res@(code, _) <- genStmts ss DList.empty
-  (_, globals, counters) <- get
-  put (locals, globals, counters)
+  (_, globals, counters, context) <- get
+  put (locals, globals, counters, context)
   return res

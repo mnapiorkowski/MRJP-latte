@@ -2,6 +2,7 @@ module Backend.Generator.Expressions where
 
 import qualified Data.Map as Map
 import qualified Data.DList as DList
+import Data.List (intercalate)
 
 import Control.Monad.Reader
 
@@ -10,6 +11,21 @@ import Latte.Abs
 import Common
 import Backend.Types
 import Backend.Utils
+
+genCastToSuper :: Val -> Type -> CM (Code, Val)
+genCastToSuper v superT = do
+  (subT, superVar) <- case valType v of
+    T t -> return (t, T superT)
+    Ref t -> return (t, Ref superT)
+  compatible <- areTypesCompatible superT subT
+  if (subT == superT) || (not compatible)
+    then return (DList.empty, v)
+  else do
+    sym <- newLocalSym
+    let bitcast = DList.singleton $ (genLocSymbol sym) ++ " = bitcast " ++
+                  genTypedVal v ++ " to " ++ genVarType superVar
+    let castedVal = VLocal (superVar, sym)
+    return (bitcast, castedVal)
 
 genEString :: String -> CM (Code, Val)
 genEString s = do
@@ -70,12 +86,15 @@ genGetArrayElem arr idx = do
 
 genLoadVar :: Ident -> CM (Code, Val)
 genLoadVar id = do
-  var@(t, _) <- getLocal id
-  let t' = dereference t
-  sym' <- newLocalSym
-  let load = DList.singleton $ (genLocSymbol sym') ++ " = load " ++ 
-            (genVarType t') ++ ", " ++ genTypedVal (VLocal var)
-  return (load, (VLocal (t', sym')))
+  local <- tryGetLocal id
+  case local of
+    Just var@(t, _) -> do
+      let t' = dereference t
+      sym' <- newLocalSym
+      let load = DList.singleton $ (genLocSymbol sym') ++ " = load " ++ 
+                (genVarType t') ++ ", " ++ genTypedVal (VLocal var)
+      return (load, (VLocal (t', sym')))
+    Nothing -> genELVal (LAttr Nothing (ESelf Nothing) id)
 
 genELVal :: LVal -> CM (Code, Val)
 genELVal lv = case lv of
@@ -118,17 +137,60 @@ genELVal lv = case lv of
                 " = load " ++ (genType attrT) ++ ", " ++ (genTypedVal ptr)
       return (DList.concat [code, gep, load], attr)
 
+genArg :: Val -> Type -> CM (Code, String)
+genArg v t = do
+  (cast, v') <- genCastToSuper v t
+  return (cast, genTypedVal v')
+
+genArgs :: [Val] -> [Type] -> Code -> [String] -> CM (Code, [String])
+genArgs [] _ codeAcc argsAcc = return (codeAcc, reverse argsAcc)
+genArgs (v:vs) (t:ts) codeAcc argsAcc = do
+  (code, arg) <- genArg v t
+  genArgs vs ts (DList.append codeAcc code) (arg:argsAcc)
+
 genECall :: Ident -> [Expr] -> CM (Code, Val)
 genECall id es = do
-  (code, vals) <- genExprs es (DList.empty, [])
   (funcEnv, _) <- ask
-  let (t, _) = funcEnv Map.! id
+  if Map.member id funcEnv
+    then do
+      (code, vals) <- genExprs es (DList.empty, [])
+      let (t, paramTs) = funcEnv Map.! id
+      (casts, args) <- genArgs vals paramTs DList.empty []
+      let argsStr = intercalate ", " args
+      sym <- newLocalSym
+      let assStr  | t == VoidT = ""
+                  | otherwise = (genLocSymbol sym) ++ " = "
+      let call = DList.singleton $ assStr ++ "call " ++ (genType t) ++ 
+                  " @" ++ (genIdent id) ++ "(" ++ argsStr ++ ")"
+      return (DList.concat [code, casts, call], (VLocal (T t, sym)))
+  else genEMetCall (ESelf Nothing) id es
+
+findClassWithMethod :: Ident -> Ident -> CM Ident
+findClassWithMethod id classId = do
+  methods <- getMethods classId
+  if Map.member id methods
+    then return classId
+  else do
+    super <- getSuper classId
+    case super of
+      Just superId -> findClassWithMethod id superId
+
+genEMetCall :: Expr -> Ident -> [Expr] -> CM (Code, Val)
+genEMetCall e id es = do
+  (code, vals) <- genExprs (e:es) (DList.empty, [])
+  let classType = convVarType $ valType (head vals)
+  classId <- findClassWithMethod id (classIdent classType)
+  methods <- getMethods classId
+  let (t, paramTs) = methods Map.! id
+  (casts, args) <- genArgs vals ((ClassT classId):paramTs) DList.empty []
+  let argsStr = intercalate ", " args
   sym <- newLocalSym
   let assStr  | t == VoidT = ""
               | otherwise = (genLocSymbol sym) ++ " = "
   let call = DList.singleton $ assStr ++ "call " ++ (genType t) ++ 
-              " @" ++ (genIdent id) ++ "(" ++ (genArgs vals) ++ ")"
-  return (DList.concat [code, call], (VLocal (T t, sym))) 
+              " @" ++ (restrictName $ genIdent classId) ++ "_" ++ 
+              genIdent id ++ "(" ++ argsStr ++ ")"
+  return (DList.concat [code, casts, call], (VLocal (T t, sym)))
 
 genAttrInit :: Val -> (Int, Type) -> CM Code
 genAttrInit v (num, t) = do
@@ -151,14 +213,15 @@ genAttrInits v (a:as) acc = do
 
 genENewObj :: Type -> CM (Code, Val)
 genENewObj t@(ClassT id) = do
-  allocaSym <- newLocalSym
-  let allocaVal = VLocal (T t, allocaSym)
-  let alloca = DList.singleton $ (genLocSymbol allocaSym) ++ " = alloca " ++ 
-                genClassType id
+  mallocSym <- newLocalSym
+  let mallocVal = VLocal (T t, mallocSym)
+  let malloc = DList.singleton $ (genLocSymbol mallocSym) ++ " = call " ++ 
+              genType t ++ " @" ++ (restrictName $ genIdent id) ++ "_" ++
+              restrictName "malloc" ++ "()"
   attributes <- getAttributes id
   let attrList = Map.elems attributes
-  inits <- genAttrInits allocaVal attrList DList.empty
-  return (DList.concat [alloca, inits], allocaVal)
+  inits <- genAttrInits mallocVal attrList DList.empty
+  return (DList.concat [malloc, inits], mallocVal)
 
 genENewArr :: Type -> Expr -> CM (Code, Val)
 genENewArr t e = do
@@ -183,11 +246,14 @@ genENewArr t e = do
                     (genLocSymbol sizeOfTypeSym) ++ " to " ++ (genType IntT)
   let sizeOfTypeVal = VLocal (T IntT, sizeOfTypeSym')
   let memset = DList.singleton $ "call " ++ (genType VoidT) ++ 
-              " @_clearNElems(" ++ (genTypedVal bitcastVal) ++ ", " ++ 
-              (genTypedVal v) ++ ", " ++ (genTypedVal sizeOfTypeVal) ++ ")"
+              " @" ++ restrictName "clearNElems" ++ "(" ++ 
+              (genTypedVal bitcastVal) ++ ", " ++ (genTypedVal v) ++ 
+              ", " ++ (genTypedVal sizeOfTypeVal) ++ ")"
   arrMallocSym <- newLocalSym
   let arrMalloc = DList.singleton $ (genLocSymbol arrMallocSym) ++ 
-                  " = call " ++ (genType (ArrayT t)) ++ " @_mallocArrayType()"
+                  " = call " ++ (genType (ArrayT t)) ++ " @" ++ 
+                  restrictName (restrictName "array" ++ "_" ++ 
+                  restrictName "malloc") ++ "()"
   let arrVal = VLocal (T (ArrayT t), arrMallocSym)
   arrPtrSym <- newLocalSym
   let gepArrPtr = DList.singleton $ (genLocSymbol arrPtrSym) ++ 
@@ -236,11 +302,15 @@ genECast t e = do
 genBinaryOp :: Type -> Expr -> Expr -> String -> CM (Code, Val)
 genBinaryOp t e1 e2 instr = do
   (c1, v1) <- genExpr e1
+  let t1 = convVarType $ valType v1
   (c2, v2) <- genExpr e2
+  let t2 = convVarType $ valType v2
+  (cast1, v1') <- genCastToSuper v1 t2
+  (cast2, v2') <- genCastToSuper v2 t1
   sym <- newLocalSym
   let code = DList.singleton $ (genLocSymbol sym) ++ " = " ++ instr ++ " " ++ 
-            (genTypedVal v1) ++ ", " ++ (genVal v2)
-  return (DList.concat [c1, c2, code], (VLocal (T t, sym)))
+            (genTypedVal v1') ++ ", " ++ (genVal v2')
+  return (DList.concat [c1, c2, cast1, cast2, code], (VLocal (T t, sym)))
 
 genCheckAgainstVal :: Val -> String -> Val -> CM Code
 genCheckAgainstVal v s vCmp = do
@@ -275,7 +345,8 @@ genAddOp e1 op e2 = case op of
   OPlus _ -> do
     (_, v) <- genExpr e1
     case v of
-      VLocal (T StringT, _) -> genECall (Ident "_concatStrings") [e1, e2]
+      VLocal (T StringT, _) -> 
+        genECall (Ident (restrictName "concatStrings")) [e1, e2]
       _ -> genBinaryOp IntT e1 e2 "add"
 
 genMulOp :: Expr -> MulOp -> Expr -> CM (Code, Val)
@@ -350,21 +421,20 @@ genExpr e = case e of
   EString _ s -> genEString s
   ENull _ -> return (DList.empty, VConst CNull)
   ELVal _ lv -> genELVal lv
-  -- ESelf _ ->
+  ESelf _ -> genLoadVar (Ident $ restrictName "this")
   ECall _ id es -> genECall id es
-  -- EMetCall _ e id es ->
+  EMetCall _ e id es -> genEMetCall e id es
   ENewObj _ tt -> genENewObj (convType tt)
   ENewArr _ tt e -> genENewArr (convType tt) e
   ECast _ tt e -> genECast (convType tt) e
   ECastClass _ (ELVal _ (LVar _ id)) e -> genECast (ClassT id) e
-  ENeg pos e -> genAddOp (ELitInt pos 0) (OMinus pos) e
-  ENot pos e -> genRelOp (ELitFalse pos) (OEq pos) e
+  ENeg _ e -> genAddOp (ELitInt Nothing 0) (OMinus Nothing) e
+  ENot _ e -> genRelOp (ELitFalse Nothing) (OEq Nothing) e
   EMul _ e1 op e2 -> genMulOp e1 op e2
   EAdd _ e1 op e2 -> genAddOp e1 op e2
   ERel _ e1 op e2 -> genRelOp e1 op e2
   EAnd _ e1 e2 -> genEAnd e1 e2
   EOr _ e1 e2 -> genEOr e1 e2
-  -- _ -> return (DList.empty, VConst (CBool False))
 
 genExprs :: [Expr]-> (Code, [Val]) -> CM (Code, [Val])
 genExprs [] (codeAcc, valAcc) = return (codeAcc, reverse valAcc)

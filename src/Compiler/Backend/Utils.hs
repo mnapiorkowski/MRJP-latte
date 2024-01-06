@@ -25,14 +25,18 @@ genClassType :: Ident -> String
 genClassType id = "%" ++ printTree id
 
 genArrayType :: String
-genArrayType = genClassType (Ident "_array")
+genArrayType = genClassType (Ident (restrictName "array"))
+
+defaultVal :: Type -> Val
+defaultVal t = case t of
+  IntT -> VConst (CInt 0)
+  BoolT -> VConst (CBool False)
+  _ -> VConst CNull
 
 genDefaultVal :: Type -> String
 genDefaultVal t = case t of
   VoidT -> ""
-  IntT -> genVal (VConst (CInt 0))
-  BoolT -> genVal (VConst (CBool False))
-  _ -> genVal (VConst CNull)
+  _ -> genVal $ defaultVal t
 
 genTypedDefaultVal :: Type -> String
 genTypedDefaultVal t = (genType t) ++ " " ++ genDefaultVal t
@@ -104,34 +108,37 @@ arrayElemType (ArrayT t) = t
 
 newLocalSym :: CM Symbol
 newLocalSym = do
-  newId <- gets (\(_, _, (l, _, _)) -> l)
-  modify (\(locals, globals, (l, g, lab)) -> 
-    (locals, globals, (succ l, g, lab)))
+  newId <- gets (\(_, _, (l, _, _), _) -> l)
+  modify (\(locals, globals, (l, g, lab), context) -> 
+    (locals, globals, (succ l, g, lab), context))
   return $ NumSym newId
 
 setLocal :: Ident -> Var -> CM ()
-setLocal id var = modify (\(locals, globals, counters) -> 
-  (Map.insert id var locals, globals, counters))
+setLocal id var = modify (\(locals, globals, counters, context) -> 
+  (Map.insert id var locals, globals, counters, context))
 
 getLocal :: Ident -> CM Var
-getLocal id = gets (\(locals, _, _) -> locals Map.! id)
+getLocal id = gets (\(locals, _, _, _) -> locals Map.! id)
+
+tryGetLocal :: Ident -> CM (Maybe Var)
+tryGetLocal id = gets (\(locals, _, _, _) -> Map.lookup id locals)
 
 newGlobalSym :: CM Symbol
 newGlobalSym = do
-  newId <- gets (\(_, _, (_, g, _)) -> g)
-  modify (\(locals, globals, (l, g, lab)) -> 
-    (locals, globals, (l, succ g, lab)))
+  newId <- gets (\(_, _, (_, g, _), _) -> g)
+  modify (\(locals, globals, (l, g, lab), context) -> 
+    (locals, globals, (l, succ g, lab), context))
   return $ NumSym newId
 
 setGlobal :: Ident -> Var -> CM ()
-setGlobal id var = modify (\(locals, globals, counters) -> 
-  (locals, Map.insert id var globals, counters))
+setGlobal id var = modify (\(locals, globals, counters, context) -> 
+  (locals, Map.insert id var globals, counters, context))
 
 getGlobal :: Ident -> CM Var
-getGlobal id = gets (\(_, globals, _) -> globals Map.! id)
+getGlobal id = gets (\(_, globals, _, _) -> globals Map.! id)
 
 tryGetGlobal :: Ident -> CM (Maybe Var)
-tryGetGlobal id = gets (\(_, globals, _) -> Map.lookup id globals)
+tryGetGlobal id = gets (\(_, globals, _, _) -> Map.lookup id globals)
 
 getAttributes :: Ident -> CM AttrEnv
 getAttributes classId = do
@@ -153,19 +160,31 @@ getSuper classId = do
 
 newLabel :: CM Symbol
 newLabel = do
-  newId <- gets (\(_, _, (_, _, lab)) -> lab)
-  modify (\(locals, globals, (l, g, lab)) -> 
-    (locals, globals, (l, g, succ lab)))
+  newId <- gets (\(_, _, (_, _, lab), _) -> lab)
+  modify (\(locals, globals, (l, g, lab), context) -> 
+    (locals, globals, (l, g, succ lab), context))
   return $ NumSym newId
 
-genArgs :: [Val] -> String
-genArgs [] = ""
-genArgs (v:vs) = do
-  let a = genTypedVal v
-  let as = genArgs vs
-  if as == ""
-    then a
-  else a ++ ", " ++ as
+isSuperClassOf :: Ident -> Ident -> CM Bool
+isSuperClassOf superId subId  = do
+  super <- getSuper subId
+  case super of
+    Just superSubId -> do
+      if superId == superSubId
+        then return True
+      else isSuperClassOf superId superSubId 
+    Nothing -> return False 
+
+areTypesCompatible :: Type -> Type -> CM Bool
+areTypesCompatible t1 t2 = do
+  if t1 == t2
+    then return True
+  else if (isClassType t1) && (isClassType t2)
+    then do
+      let id1 = classIdent t1
+      let id2 = classIdent t2
+      isSuperClassOf id1 id2
+  else return False
 
 genGlobString :: Ident -> Var -> String
 genGlobString (Ident s) (t, sym) = (genGlobSymbol sym) ++ 

@@ -25,4 +25,7 @@ Source files of the project are in `src/Compiler` directory. BNFC files generate
 ## Implemented extensions
 - arrays
 - structs
-- front-end for objects
+- objects
+
+## TODO
+- virtual methods

@@ -47,6 +47,9 @@ isClassType _ = False
 classIdent :: Type -> Ident
 classIdent (ClassT id) = id
 
+restrictName :: String -> String
+restrictName s = "_" ++ s
+
 posStr :: Pos -> String
 posStr Nothing = "in unknown position:\n"
 posStr (Just (l, c)) = "at line " ++ show l ++ ", column " ++ show c ++ ":\n"
