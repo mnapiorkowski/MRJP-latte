@@ -1,11 +1,7 @@
 module Common where
 
 import System.IO
-import System.Environment     (getArgs)
-import System.FilePath.Posix  (splitExtension)
-import System.Exit            (exitFailure)
-
-import Control.Exception
+import System.Exit (exitFailure)
 
 import Data.Map (Map)
 
@@ -14,9 +10,10 @@ import Latte.Print (printTree)
 
 type Pos = BNFC'Position
 
-type FuncEnv = Map Ident (Type, [Type])
+type FuncType = (Type, [Type])
+type FuncEnv = Map Ident FuncType
 type AttrEnv = Map Ident (Int, Type)
-type MethodEnv = FuncEnv
+type MethodEnv = Map Ident (Int, Ident, FuncType)
 type Super = Maybe Ident
 type ClassEnv = Map Ident (AttrEnv, MethodEnv, Super)
 
@@ -54,15 +51,6 @@ posStr :: Pos -> String
 posStr Nothing = "in unknown position:\n"
 posStr (Just (l, c)) = "at line " ++ show l ++ ", column " ++ show c ++ ":\n"
 
-printSuccess :: IO ()
-printSuccess = hPutStrLn stderr "OK"
-
-printError :: String -> IO a
-printError err = do
-  hPutStrLn stderr "ERROR"
-  hPutStrLn stderr err
-  exitFailure
-
 tryEval :: Expr -> Maybe Const
 tryEval e = case e of
   ELitInt _ i -> Just $ CInt i
@@ -73,24 +61,11 @@ tryEval e = case e of
     Nothing -> Nothing
   _ -> Nothing
 
-tryReadFile :: String -> IO String
-tryReadFile filePath = do
-  res <- try $ readFile $ filePath :: IO (Either IOException String)
-  case res of
-    Left _ -> printError ("could not read file " ++ filePath)
-    Right file -> return file
+printSuccess :: IO ()
+printSuccess = hPutStrLn stderr "OK"
 
-readSource :: IO (String, String)
-readSource = do
-  args <- getArgs
-  if length args /= 1
-    then printError "usage: ./latc_llvm <source file>"
-  else do
-    let filePath = args !! 0
-    let (filePathNoExt, ext) = splitExtension filePath
-    if ext /= ".lat"
-      then printError "source file must have extension .lat"
-    else do
-      file <- tryReadFile filePath
-      return (file, filePathNoExt)
-
+printError :: String -> IO a
+printError err = do
+  hPutStrLn stderr "ERROR"
+  hPutStrLn stderr err
+  exitFailure

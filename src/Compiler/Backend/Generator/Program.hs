@@ -7,8 +7,9 @@ import Control.Monad.State
 import Control.Monad.Reader
 
 import qualified Data.Map as Map
+import Data.Map (Map)
 import qualified Data.DList as DList
-import Data.List (isPrefixOf, isSuffixOf, intercalate, sortBy)
+import Data.List (isPrefixOf, isSuffixOf, intercalate, sortBy, sortOn)
 import Data.Function (on)
 
 import Latte.Abs
@@ -63,24 +64,18 @@ genFunc tt (Ident id) as b = do
   modify (\(locals, globals, (_, g, _), _) -> 
           (locals, globals, (0, g, 0), (t)))
   let ps = intercalate ", " (map genParam as)
-  let open = DList.fromList [
-            "define " ++ (genType t) ++ " " ++ (genGlobSymbol (StrSym id)) ++ 
-            "(" ++ ps ++ ") {"
-            ]
+  let open = DList.singleton $ "define " ++ (genType t) ++ " " ++ 
+            (genGlobSymbol (StrSym id)) ++ "(" ++ ps ++ ") {"
   storeParams <- genStoreParams as DList.empty
   (code, hasRet) <- genBlock b
-  close <- if (not hasRet) 
-    then return $ DList.fromList [ 
-        "ret " ++ (genTypedDefaultVal t), 
-        "}"
-        ]
-    else return $ DList.singleton "}"
-  return $ DList.concat [open, storeParams, code, close]
+  let ret | (not hasRet) = DList.singleton $ "ret " ++ (genTypedDefaultVal t)
+          | otherwise = DList.empty
+  return $ DList.concat [open, storeParams, code, ret, DList.singleton "}"]
 
 attributesTypes :: Ident -> CM [Type]
 attributesTypes classId = do
   as <- getAttributes classId
-  return $ map snd  $ sortBy (compare `on` fst) (Map.elems as)
+  return $ map snd $ sortBy (compare `on` fst) (Map.elems as)
 
 genMethod :: Ident -> CMember -> CM Code
 genMethod id@(Ident classId) m = case m of
@@ -97,13 +92,41 @@ genMethods classId (m:ms) acc = do
   code <- genMethod classId m
   genMethods classId ms (DList.append acc code)
 
-typeDecl :: Ident -> [Type] -> Code
-typeDecl id types = DList.singleton $ (genClassType id) ++ " = type {" ++ 
-  (intercalate ", " (map genType types)) ++ "}" 
+genTypeDecl :: Ident -> [Type] -> Code
+genTypeDecl id types = DList.append (DList.singleton $
+  (genClassType id) ++ " = type {" ++ genTypesList types ++ "}") 
+  (DList.singleton "")
+
+genVtableTypeDecl :: Ident -> CM Code
+genVtableTypeDecl classId = do
+  methods <- getMethods classId
+  let sorted = sortOn (\(num, _, _) -> num) (Map.elems methods)
+  let types = map (\(_, id, (retT, argTs)) -> (retT, (ClassT id):argTs)) sorted
+  let code = DList.singleton $ (genClassType $ vtableTypeId classId) ++ 
+            " = type {" ++ genFuncTypesList types ++ "}"
+  return $ DList.append code (DList.singleton "")
+
+genVtableMethods :: [(Ident, (Int, Ident, FuncType))] -> Code -> CM Code
+genVtableMethods [] acc = return acc
+genVtableMethods (((Ident id), (_, classId, (retT, argTs))):ms) acc = do
+  let sep | null ms = ""
+          | otherwise = ","
+  let code = DList.singleton $ genFuncType (retT, (ClassT classId):argTs) ++ 
+            " " ++ genGlobSymbol (StrSym $ restrictName 
+            (genIdent classId ++ "_" ++ id)) ++ sep
+  genVtableMethods ms (DList.append acc code)
+
+genVtableDataDecl :: Ident -> CM Code
+genVtableDataDecl classId = do
+  let decl = DList.singleton $ genVtableData classId ++ " = global " ++
+            genVtableType classId ++ " {"
+  methods <- getMethods classId
+  let sorted = sortOn ((\(num, _, _) -> num) . snd) (Map.toList methods)
+  code <- genVtableMethods sorted DList.empty
+  return $ DList.concat [decl, code, DList.singleton "}", DList.singleton ""]
 
 mallocObject :: Ident -> Code
 mallocObject id = DList.fromList [
-  "",
   "define " ++ genType (ClassT id) ++ " @" ++ 
   restrictName (genIdent id ++ "_" ++ restrictName "malloc") ++ "() {",
   "%sizeptr = getelementptr " ++ genClassType id ++ ", " ++ 
@@ -121,10 +144,14 @@ mallocObject id = DList.fromList [
 genClass :: Ident -> ClassBlock -> CM Code
 genClass id (CBlock _ members) = do
   types <- attributesTypes id
-  let decl = typeDecl id types
+  let decl = genTypeDecl id ((ClassT $ vtableTypeId id):types)
+  vTypeDecl <- genVtableTypeDecl id
+  vDataDecl <- genVtableDataDecl id
   let malloc = mallocObject id
   methods <- genMethods id members DList.empty
-  return $ DList.concat [decl, malloc, methods]
+  return $ DList.concat [
+    decl, vTypeDecl, vDataDecl, malloc, methods
+    ]
 
 genTopDefs :: [TopDef] -> Code -> Code -> CM Code
 genTopDefs [] cs fs = return $ DList.append cs fs
@@ -142,7 +169,7 @@ genTopDefs (d:ds) cs fs = case d of
 genProgr :: Program -> CM Code
 genProgr (Progr _ ds) = do
   let arrayId = Ident $ restrictName "array"
-  let arrayDecl = typeDecl arrayId [PtrT, IntT]
+  let arrayDecl = genTypeDecl arrayId [PtrT, IntT]
   let arrayMalloc = mallocObject arrayId
   code <- genTopDefs ds DList.empty DList.empty
   return $ DList.concat [DList.singleton "", arrayDecl, arrayMalloc, code]
@@ -154,9 +181,8 @@ compile p env = do
   case res of
     Left err -> printError ("compilation error " ++ err)
     Right (code, (_, globals, _, _)) -> do
-      strings <- if Map.null globals
-        then return DList.empty
-        else return $ DList.append (DList.singleton "")
-                      (DList.fromList $ genGlobStrings globals) 
+      let strings | Map.null globals = DList.empty
+                  | otherwise = DList.append (DList.singleton "")
+                    (DList.fromList $ genGlobStrings globals) 
       return $ indent $ DList.concat [declarations, strings, code]
       

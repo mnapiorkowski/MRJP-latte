@@ -20,12 +20,10 @@ It will create file `foo/bar/baz.ll` with generated LLVM code and bitcode file `
 - dlist (`cabal install dlist`)
 
 ## Project structure
-Source files of the project are in `src/Compiler` directory. BNFC files generated from `src/Latte.cf` will be placed in `src/Latte`. GHC output files will be placed in `build` directory.
+Source files of the project are in `src/Compiler` directory. BNFC files generated from `src/Latte.cf` will be placed in `src/Latte`. Library functions (written by me in LLVM IR) are in `lib/runtime.ll` directory. GHC output files will be placed in `build` directory.
 
 ## Implemented extensions
 - arrays
 - structs
 - objects
-
-## TODO
 - virtual methods

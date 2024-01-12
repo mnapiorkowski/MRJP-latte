@@ -52,7 +52,8 @@ typeOfParam (AArg pos tt id) = do
   let t = convType tt
   isValid <- isValidType t
   if not isValid
-    then throwE pos $ "invalid type " ++ showType t ++ " of function parameter"
+    then throwE pos $ 
+      "invalid type " ++ showType t ++ " of function parameter"
   else return t
 
 typeOfParams :: [Arg] -> TM [Type]
@@ -76,7 +77,8 @@ checkAttribute :: AttrItem -> AttrEnv -> Int -> Type -> TM (AttrEnv, Int)
 checkAttribute (AttrNoInit pos id) attributes num t = do
   if Map.member id attributes
     then throwE pos $
-      "class attribute " ++ printTree id ++ " is already declared in this class"
+      "class attribute " ++ printTree id ++ 
+      " is already declared in this class"
   else return (Map.insert id (num, t) attributes, succ num)
 
 checkAttributes :: [AttrItem] -> AttrEnv -> Int -> Type -> TM (AttrEnv, Int)
@@ -85,17 +87,17 @@ checkAttributes (a:as) attributes num t = do
   (attributes', num') <- checkAttribute a attributes num t
   checkAttributes as attributes' num' t
 
-checkMembers' :: [CMember] -> Int -> AttrEnv -> MethodEnv -> 
+checkMembers' :: Ident -> [CMember] -> Int -> AttrEnv -> Int -> MethodEnv -> 
   TM (AttrEnv, MethodEnv)
-checkMembers' [] _ attributes methods = return (attributes, methods)
-checkMembers' (m:ms) num attributes methods = case m of
+checkMembers' _ [] _ attributes _ methods = return (attributes, methods)
+checkMembers' classId (m:ms) attrNum attributes metNum methods = case m of
   CAttr pos tt as -> do
     let t = convType tt
     isValid <- isValidType t
     if isValid
       then do
-        (attributes', num') <- checkAttributes as attributes num t
-        checkMembers' ms num' attributes' methods
+        (attributes', attrNum') <- checkAttributes as attributes attrNum t
+        checkMembers' classId ms attrNum' attributes' metNum methods
     else throwE pos $
       "invalid type " ++ showType t ++ " of class attribute"
   CMethod pos tt id as _ -> do
@@ -109,14 +111,15 @@ checkMembers' (m:ms) num attributes methods = case m of
         then throwE pos $ "method returns invalid type " ++ showType t
       else do
         paramTs <- typeOfParams as
-        checkMembers' ms num attributes (Map.insert id (t, paramTs) methods)
+        checkMembers' classId ms attrNum attributes (succ metNum) 
+                      (Map.insert id (metNum, classId, (t, paramTs)) methods)
 
-checkMembers :: ClassBlock -> TM (AttrEnv, MethodEnv)
-checkMembers (CBlock _ ms) = checkMembers' ms 0 Map.empty Map.empty
-
+checkMembers :: Ident -> ClassBlock -> TM (AttrEnv, MethodEnv)
+checkMembers id (CBlock _ ms) = checkMembers' id ms 1 Map.empty 0 Map.empty
+  
 checkClassMembers :: Ident -> ClassBlock -> Super -> TM Env
 checkClassMembers id cb super = do
-  (attributes, methods) <- checkMembers cb
+  (attributes, methods) <- checkMembers id cb
   setClass id attributes methods super
 
 checkTopDef1 :: TopDef -> TM Env
@@ -210,7 +213,7 @@ checkMethods (m:ms) id = case m of
   CAttr _ _ _ -> checkMethods ms id
   CMethod _ _ metId as b -> do
     methods <- getMethods id
-    let (t, _) = methods Map.! metId
+    let (_, _, (t, _)) = methods Map.! metId
     checkFuncBody metId as b (t, Just id)
     checkMethods ms id
 
@@ -257,49 +260,61 @@ checkTopDefs2 (d:ds) = do
   checkTopDef2 d
   checkTopDefs2 ds
 
-nextAttrNum :: AttrEnv -> Int
-nextAttrNum attrs = 1 + (maximum $ map fst (Map.elems attrs))
-
-mergeAttributes' :: Ident -> TM (AttrEnv, Int)
-mergeAttributes' classId = do
-  super <- getSuper classId
+mergeAttributes :: Ident -> TM (AttrEnv, Int)
+mergeAttributes classId = do
   attrs <- getAttributes classId
+  super <- getSuper classId
   case super of
     Just superId -> do
-      (superAttrs, next) <- mergeAttributes' superId
-      -- let sorted = List.sortBy (compare `on` (fst . snd)) (Map.toList attrs)
-      -- let renumbered = Map.fromList $ zipWith (\(id, (oldNum, t)) newNum -> 
-      --                 (id, (newNum, t))) sorted [next..]
-      let renumbered = Map.map (\(num, t) -> (num + next, t)) attrs
+      (superAttrs, next) <- mergeAttributes superId
+      let (newNext, renumbered) = Map.mapAccum 
+            (\(n) (num, t) -> ((succ n), (num + next - 1, t))) 
+            next attrs
       let merged = Map.union superAttrs renumbered
-      return (merged, nextAttrNum renumbered)
-    Nothing -> do
-      next <- if Map.null attrs
-        then return 0
-        else return $ nextAttrNum attrs
-      return (attrs, next)
+      return (merged, newNext)
+    Nothing -> return (attrs, (Map.size attrs) + 1)
 
-mergeAttributes :: [Ident] -> [(Ident, AttrEnv)] -> TM [(Ident, AttrEnv)]
-mergeAttributes [] acc = return acc
-mergeAttributes (id:ids) acc = do
-  (attrEnv, _) <- mergeAttributes' id
-  mergeAttributes ids ((id, attrEnv):acc)
+mergeMethods :: Ident -> TM (MethodEnv, Int)
+mergeMethods classId = do
+  methods <- getMethods classId
+  super <- getSuper classId
+  case super of
+    Just superId -> do
+      (superMethods, next) <- mergeMethods superId
+      let diff = Map.difference methods superMethods
+      let (newNext, renumbered) = Map.mapAccum 
+            (\(n) (_, id, t) -> ((succ n), (n, id, t))) 
+            next diff
+      let merged = Map.unionWith 
+            (\(_, subId, subT) (superNum, _, _) -> 
+              (superNum, subId, subT)) 
+            methods superMethods
+      let mergedRenumbered = Map.union renumbered merged
+      return (mergedRenumbered, newNext)
+    Nothing -> return (methods, Map.size methods)
 
-updateAttrEnvs :: [(Ident, AttrEnv)] -> TM ClassEnv
-updateAttrEnvs [] = getClassEnv
-updateAttrEnvs ((id, attrEnv):t) = do
-  methods <- getMethods id
+mergeMembers :: [Ident] -> [(Ident, AttrEnv, MethodEnv)] ->
+  TM ([(Ident, AttrEnv, MethodEnv)])
+mergeMembers [] acc = return acc
+mergeMembers (id:ids) acc = do
+  (attrEnv, _) <- mergeAttributes id
+  (metEnv, _) <- mergeMethods id
+  mergeMembers ids ((id, attrEnv, metEnv):acc)
+
+updateEnvs :: [(Ident, AttrEnv, MethodEnv)] -> TM ClassEnv
+updateEnvs [] = getClassEnv
+updateEnvs ((id, attrEnv, metEnv):es) = do
   super <- getSuper id
-  env <- setClass id attrEnv methods super
-  local (const env) $ updateAttrEnvs t  
+  env <- setClass id attrEnv metEnv super
+  local (const env) $ updateEnvs es
 
 checkProgr :: Program -> TM (FuncEnv, ClassEnv)
 checkProgr (Progr pos ds) = do
   env <- setTopDefs ds
   env'@(_, funcEnv, classEnv, _) <- local (const env) $ checkTopDefs1 ds
   local (const env') $ checkTopDefs2 ds
-  attrEnvs <- local (const env') $ mergeAttributes (Map.keys classEnv) []
-  classEnv' <- local (const env') $ updateAttrEnvs attrEnvs
+  envs <- local (const env') $ mergeMembers (Map.keys classEnv) []
+  classEnv' <- local (const env') $ updateEnvs envs
   let main = Ident "main"
   if Map.notMember main funcEnv
     then throwE pos $

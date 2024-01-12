@@ -139,10 +139,14 @@ genSIf e s = case tryEval e of
     let label1 = DList.singleton $ genLabel lIf
     let label2 = DList.singleton $ genLabel lEnd
     if hasRet
-      then return (DList.concat [cond, brCond, label1, ifCode, label2], False)
+      then return (DList.concat [
+        cond, brCond, label1, ifCode, label2
+        ], False)
     else do
       let brEnd = DList.singleton $ "br " ++ (genTypedLabel lEnd)
-      return (DList.concat [cond, brCond, label1, ifCode, brEnd, label2], False)
+      return (DList.concat [
+        cond, brCond, label1, ifCode, brEnd, label2
+        ], False)
 
 genSIfElse :: Expr -> Stmt -> Stmt -> CM (Code, HasRet)
 genSIfElse e sIf sElse = case tryEval e of

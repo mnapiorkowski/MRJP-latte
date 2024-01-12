@@ -1,6 +1,6 @@
 module Frontend.Utils where
 
-import qualified Control.Monad.Except as E ( throwError )
+import qualified Control.Monad.Except as E (throwError)
 import Control.Monad.Reader
 
 import qualified Data.Map as Map

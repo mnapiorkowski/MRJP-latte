@@ -108,13 +108,6 @@ typeOfLVal pos lv = case lv of
       then throwE pos $ "type " ++ showType t ++ 
         " does not have the attribute " ++ printTree id
     else typeOfVarInClass pos id (classIdent t)
-      -- attributes <- getAttributes (classIdent t)
-      -- if Map.notMember id attributes
-      --   then throwE pos $ "class " ++ showType t ++ 
-      --     " does not have the attribute " ++ printTree id
-      -- else do
-      --   let (_, retT) = attributes Map.! id
-      --   return retT
 
 typeOfSelf :: Pos -> TM Type
 typeOfSelf pos = do
@@ -148,7 +141,7 @@ typeOfCallInClass pos id es classId = do
   methods <- getMethods classId
   if Map.member id methods
     then do
-      let (retT, paramTs) = methods Map.! id
+      let (_, _, (retT, paramTs)) = methods Map.! id
       checkArgs pos id paramTs es
       return retT
   else do

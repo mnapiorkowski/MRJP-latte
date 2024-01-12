@@ -5,6 +5,7 @@ import Control.Monad.Reader
 import qualified Control.Monad.Except as E ( throwError )
 
 import qualified Data.Map as Map
+import Data.List (intercalate)
 
 import Latte.Abs
 import Latte.Print (printTree)
@@ -21,8 +22,28 @@ genType (ArrayT t) = genArrayType ++ "*"
 genType (ClassT id) = genClassType id ++ "*"
 genType PtrT = "i8*"
 
+genTypesList :: [Type] -> String
+genTypesList types = intercalate ", " (map genType types)
+
+genFuncType :: FuncType -> String
+genFuncType (retT, argTs) = genType retT ++ "(" ++ genTypesList argTs ++ ")*"
+
+genFuncTypesList :: [FuncType] -> String
+genFuncTypesList types = intercalate ", " (map genFuncType types)
+
 genClassType :: Ident -> String
 genClassType id = "%" ++ printTree id
+
+vtableTypeId :: Ident -> Ident
+vtableTypeId classId = Ident (restrictName $ genIdent classId ++ 
+                              "_vtable_type")
+
+genVtableType :: Ident -> String
+genVtableType classId = genClassType $ vtableTypeId classId
+
+genVtableData :: Ident -> String
+genVtableData classId = genGlobSymbol 
+  (StrSym (restrictName $ genIdent classId ++ "_vtable_data"))
 
 genArrayType :: String
 genArrayType = genClassType (Ident (restrictName "array"))

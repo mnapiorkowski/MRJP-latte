@@ -5,10 +5,12 @@ BNFC=bnfc
 GHC=ghc
 LLVM_AS=llvm-as
 DEV_NULL=/dev/null
+TARGET=latc_llvm
+TARGET_GEN=latc
 
 .PHONY: clean
 
-all: grammar runtime latc_llvm latc
+all: grammar runtime ${TARGET} ${TARGET_GEN}
 
 grammar: ${SRC_DIR}/Latte.cf
 	@cd ${SRC_DIR} && \
@@ -18,14 +20,16 @@ grammar: ${SRC_DIR}/Latte.cf
 runtime: ${LIB_DIR}/runtime.ll
 	@${LLVM_AS} -o ${LIB_DIR}/runtime.bc ${LIB_DIR}/runtime.ll
 	
-latc_llvm: grammar runtime
+${TARGET}: grammar runtime
 	@${GHC} ${SRC_DIR}/Compiler/Main.hs -package mtl -package dlist \
-	-i${SRC_DIR}/Compiler -i${SRC_DIR} -outputdir ${BUILD_DIR} -o latc_llvm \
+	-i${SRC_DIR}/Compiler -i${SRC_DIR} -outputdir ${BUILD_DIR} -o ${TARGET} \
 	> ${DEV_NULL}
 
-latc: latc_llvm
-	@cp latc_llvm latc
+${TARGET_GEN}: ${TARGET}
+	@echo '#!/bin/bash' > $@
+	@echo './${TARGET} $$1' >> $@
+	@chmod +x $@
 	
 clean:
 	@rm -rf ${SRC_DIR}/Latte ${SRC_DIR}/Makefile ${LIB_DIR}/runtime.bc \
-	${BUILD_DIR} latc_llvm latc
+	${BUILD_DIR} ${TARGET} ${TARGET_GEN}

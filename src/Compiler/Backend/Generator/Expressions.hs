@@ -128,7 +128,7 @@ genELVal lv = case lv of
       ptrSym <- newLocalSym
       let ptr = VLocal (Ref attrT, ptrSym)
       let gep = DList.singleton $ (genLocSymbol ptrSym) ++ 
-                " = getelementptr " ++ (genClassType (classIdent t)) ++ ", " ++ 
+                " = getelementptr " ++ (genClassType (classIdent t)) ++ ", " ++
                 (genTypedVal v) ++ ", " ++ (genType IntT) ++ 
                 " 0, " ++ (genType IntT) ++ " " ++ show num
       attrSym <- newLocalSym
@@ -165,32 +165,42 @@ genECall id es = do
       return (DList.concat [code, casts, call], (VLocal (T t, sym)))
   else genEMetCall (ESelf Nothing) id es
 
-findClassWithMethod :: Ident -> Ident -> CM Ident
-findClassWithMethod id classId = do
-  methods <- getMethods classId
-  if Map.member id methods
-    then return classId
-  else do
-    super <- getSuper classId
-    case super of
-      Just superId -> findClassWithMethod id superId
-
 genEMetCall :: Expr -> Ident -> [Expr] -> CM (Code, Val)
 genEMetCall e id es = do
   (code, vals) <- genExprs (e:es) (DList.empty, [])
-  let classType = convVarType $ valType (head vals)
-  classId <- findClassWithMethod id (classIdent classType)
+  let objVal = head vals
+  let classId = classIdent $ convVarType $ valType objVal
   methods <- getMethods classId
-  let (t, paramTs) = methods Map.! id
-  (casts, args) <- genArgs vals ((ClassT classId):paramTs) DList.empty []
+  let (num, metClassId, (t, paramTs)) = methods Map.! id
+  let funcT = (t, (ClassT metClassId):paramTs)
+  gepSym <- newLocalSym
+  let gep = DList.singleton $ genLocSymbol gepSym ++ " = getelementptr " ++
+            genClassType classId ++ ", " ++ genTypedVal objVal ++ 
+            ", " ++ (genType IntT) ++ " 0, " ++ (genType IntT) ++ " 0"
+  loadSym <- newLocalSym
+  let load = DList.singleton $ genLocSymbol loadSym ++ " = load " ++
+            (genType $ ClassT (vtableTypeId classId)) ++ ", " ++ 
+            (genVarType (Ref $ ClassT (vtableTypeId classId))) ++ " " ++
+            genLocSymbol gepSym
+  gepSym' <- newLocalSym
+  let gepMet = DList.singleton $ genLocSymbol gepSym' ++ 
+              " = getelementptr " ++ genVtableType classId ++ ", " ++ 
+              (genType $ ClassT (vtableTypeId classId)) ++ " " ++
+              genLocSymbol loadSym ++ ", " ++ genType IntT ++ " 0, " ++
+              genType IntT ++ " " ++ show num
+  loadSym' <- newLocalSym
+  let loadMet = DList.singleton $ genLocSymbol loadSym' ++ " = load " ++
+                genFuncType funcT ++ ", " ++ genFuncType funcT ++ "* " ++
+                genLocSymbol gepSym'
+  (casts, args) <- genArgs vals ((ClassT metClassId):paramTs) DList.empty []
   let argsStr = intercalate ", " args
   sym <- newLocalSym
   let assStr  | t == VoidT = ""
               | otherwise = (genLocSymbol sym) ++ " = "
   let call = DList.singleton $ assStr ++ "call " ++ (genType t) ++ 
-              " @" ++ (restrictName $ genIdent classId) ++ "_" ++ 
-              genIdent id ++ "(" ++ argsStr ++ ")"
-  return (DList.concat [code, casts, call], (VLocal (T t, sym)))
+              " " ++ genLocSymbol loadSym' ++ "(" ++ argsStr ++ ")"
+  return (DList.concat [code, gep, load, gepMet, loadMet, casts, call], 
+          VLocal (T t, sym))
 
 genAttrInit :: Val -> (Int, Type) -> CM Code
 genAttrInit v (num, t) = do
@@ -218,10 +228,20 @@ genENewObj t@(ClassT id) = do
   let malloc = DList.singleton $ (genLocSymbol mallocSym) ++ " = call " ++ 
               genType t ++ " @" ++ (restrictName $ genIdent id) ++ "_" ++
               restrictName "malloc" ++ "()"
+  vtableSym <- newLocalSym
+  let gepVtable = DList.singleton $ (genLocSymbol vtableSym) ++ 
+                  " = getelementptr " ++ genClassType id ++ ", " ++ 
+                  (genTypedVal mallocVal) ++ ", " ++ (genType IntT) ++ 
+                  " 0, " ++ (genType IntT) ++ " 0"
+  let storeVtable = DList.singleton $ "store " ++ 
+                    (genType $ ClassT (vtableTypeId id)) ++ " " ++
+                    (genVtableData id) ++ ", " ++ 
+                    (genVarType (Ref $ ClassT (vtableTypeId id))) ++ " " ++ 
+                    (genLocSymbol vtableSym)
   attributes <- getAttributes id
   let attrList = Map.elems attributes
   inits <- genAttrInits mallocVal attrList DList.empty
-  return (DList.concat [malloc, inits], mallocVal)
+  return (DList.concat [malloc, gepVtable, storeVtable, inits], mallocVal)
 
 genENewArr :: Type -> Expr -> CM (Code, Val)
 genENewArr t e = do
@@ -308,7 +328,7 @@ genBinaryOp t e1 e2 instr = do
   (cast1, v1') <- genCastToSuper v1 t2
   (cast2, v2') <- genCastToSuper v2 t1
   sym <- newLocalSym
-  let code = DList.singleton $ (genLocSymbol sym) ++ " = " ++ instr ++ " " ++ 
+  let code = DList.singleton $ (genLocSymbol sym) ++ " = " ++ instr ++ " " ++
             (genTypedVal v1') ++ ", " ++ (genVal v2')
   return (DList.concat [c1, c2, cast1, cast2, code], (VLocal (T t, sym)))
 
@@ -334,7 +354,7 @@ genDivOp e1 e2 instr = do
   (c2, v2) <- genExpr e2
   check <- genCheckAgainstVal v2 "eq" (VConst (CInt 0))
   sym <- newLocalSym
-  let code = DList.singleton $ (genLocSymbol sym) ++ " = " ++ instr ++ " " ++ 
+  let code = DList.singleton $ (genLocSymbol sym) ++ " = " ++ instr ++ " " ++
             (genTypedVal v1) ++ ", " ++ (genVal v2)
   return (DList.concat [c1, c2, check, code], 
           (VLocal (T IntT, sym)))
@@ -370,9 +390,10 @@ genBoolOp code lTrue lFalse lEnd = do
   let label3 = DList.singleton $ genLabel lEnd
   sym <- newLocalSym
   let phi = DList.singleton $ (genLocSymbol sym) ++ " = phi " ++ 
-            (genType BoolT) ++ " [" ++ (genVal $ VConst (CBool True)) ++ ", " ++ 
-            (genArgLabel lTrue) ++ "], [" ++ (genVal $ VConst (CBool False)) ++ 
-            ", " ++ (genArgLabel lFalse) ++ "]"
+            (genType BoolT) ++ " [" ++ (genVal $ VConst (CBool True)) ++ 
+            ", " ++ (genArgLabel lTrue) ++ "], [" ++ 
+            (genVal $ VConst (CBool False)) ++ ", " ++ 
+            (genArgLabel lFalse) ++ "]"
   return (DList.concat [code, br3, label3, phi], (VLocal (T BoolT, sym)))
 
 genEAnd :: Expr -> Expr -> CM (Code, Val)
